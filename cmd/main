@@ -9,16 +9,12 @@
 # TRIM_SERVICE_PORT - 服务端口
 
 export PATH=/var/apps/python312/target/bin:$PATH
-export PATH=/var/apps/nodejs_v22/target/bin:$PATH
 LOG_FILE="${TRIM_PKGVAR}/info.log"
 PID_FILE="${TRIM_PKGVAR}/app.pid"
 MUSIC_LIBRARY_PATH="${TRIM_PKGVAR}/Music"
-NETEASE_API_PORT=55486
-NETEASE_API_BASE="http://127.0.0.1:${NETEASE_API_PORT}"
-NETEASE_DOWNLOAD_PATH="${MUSIC_LIBRARY_PATH}"
 
 # write the command to start your program here 
-CMD="NETEASE_API_BASE=${NETEASE_API_BASE} NETEASE_API_PORT=${NETEASE_API_PORT} NETEASE_DOWNLOAD_PATH=${NETEASE_DOWNLOAD_PATH} python3 ${TRIM_APPDEST}/server/app.py --music-library-path ${MUSIC_LIBRARY_PATH} --log-path ${LOG_FILE} --port 23237"
+CMD="python3 ${TRIM_APPDEST}/server/app.py --music-library-path ${MUSIC_LIBRARY_PATH} --log-path ${LOG_FILE} --port 23237"
 log_msg() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> ${LOG_FILE}
 }
@@ -41,7 +37,6 @@ start_process() {
 stop_process() {
     log_msg "Stopping process ..."
 
-    # stop python app
     if [ -r "${PID_FILE}" ]; then
         pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
         
