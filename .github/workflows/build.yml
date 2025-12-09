@@ -1,7 +1,10 @@
-name: Auto Build 2FMusic
+name: Auto Build 2FMusic (Dual Versions)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 允许手动触发
+  push:              # 允许代码推送触发
+    paths:
+      - 'manifest'   # 只有当 manifest 文件发生变动时才自动触发构建
 
 permissions:
   contents: write
@@ -35,7 +38,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install pyinstaller
         
-        # 虽然 lib 里已经有库了，但为了让 PyInstaller 能正确分析并打包进二进制文件，需要在 Runner 的临时环境中安装这些依赖。
+        # 为了让 PyInstaller 能正确分析依赖，在 Runner 环境中安装它们
         if [ -f app/server/requirements.txt ]; then 
            pip install -r app/server/requirements.txt
         fi
@@ -49,19 +52,15 @@ jobs:
 
     # ==========================================
     # 5. 构建第一个版本：源码版 (Python Version)
-    #    利用仓库自带的 lib 目录直接打包
     # ==========================================
     - name: Build Source Package (Requires Python)
       id: build_source
       run: |
         echo "📦 Building Source (Python) Package..."
-        # 直接使用自带的 lib 目录打包
         fnpack build
         
-        # 重命名生成的包
         SOURCE_FPK_NAME="2fmusic-${{ steps.version.outputs.version }}-python.fpk"
         
-        # Check if file exists to be safe
         if [ -f "2fmusic.fpk" ]; then
           mv 2fmusic.fpk "$SOURCE_FPK_NAME"
         else
@@ -78,10 +77,8 @@ jobs:
     - name: Compile and Cleanup for Binary
       run: |
         echo "🔨 Compiling app.py to binary..."
-        # 编译为单文件，输出到 app/server/app
         pyinstaller --clean --onefile --name "app" --distpath "app/server" "app/server/app.py"
         
-        # 赋予执行权限
         chmod +x app/server/app
         
         echo "🧹 Cleaning up source files..."
@@ -93,7 +90,6 @@ jobs:
         rm -rf app/server/lib
         
         echo "📝 Modifying manifest (Remove Python dependency)..."
-        # 从 manifest 中删除 install_dep_apps 这一行
         sed -i '/install_dep_apps/d' manifest
         
         echo "✅ Ready for Binary Build."
@@ -107,7 +103,6 @@ jobs:
         echo "📦 Building Binary (Standalone) Package..."
         fnpack build
         
-        # 重命名生成的包
         BINARY_FPK_NAME="2fmusic-${{ steps.version.outputs.version }}-amd64.fpk"
         
         if [ -f "2fmusic.fpk" ]; then
@@ -138,7 +133,14 @@ jobs:
         body: |
           ## 🚀 Auto-built Dual Release
 
-          **Version**: ${{ steps.version.outputs.version }}
+          ### ℹ️ Build Details
+          - **Version**: ${{ steps.version.outputs.version }}
+          - **Triggered by**: @${{ github.actor }}
+          - **Event**: ${{ github.event_name }}
+          - **Commit**: ${{ github.sha }}
+          - **Message**: ${{ github.event.head_commit.message }}
+
+          ---
 
           此 Release 包含两个版本的安装包：
 
@@ -148,7 +150,7 @@ jobs:
           
           ### 2. ⚡ Binary Version (`-amd64.fpk`)
           - **文件**: `${{ steps.build_binary.outputs.binary_pkg }}`
-          - **依赖**: **无需**系统 Python 环境。
+          - **依赖**: **无需**系统 Python 环境，开箱即用。
 
           ### ⚠️ Notes
           - 这是一个测试版 (Pre-release)。
