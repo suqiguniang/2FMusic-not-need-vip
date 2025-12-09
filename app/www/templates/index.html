@@ -165,7 +165,7 @@
                             <!-- Tabs -->
                             <div class="netease-tabs">
                                 <button class="tab-btn active" data-target="tab-search">关键词搜索</button>
-                                <button class="tab-btn" data-target="tab-id">通过ID下载</button>
+                                <button class="tab-btn" data-target="tab-id">链接解析</button>
                                 <button class="tab-btn" data-target="tab-settings">保存位置</button>
                             </div>
 
@@ -186,11 +186,13 @@
                             <!-- Tab: ID -->
                             <div class="tab-content" id="tab-id">
                                 <div class="netease-id-row">
-                                    <input type="text" id="netease-song-id" placeholder="输入单曲ID">
-                                    <input type="text" id="netease-playlist-id" placeholder="输入歌单ID">
-                                    <button id="netease-id-download" class="btn-primary"><i class="fas fa-search"></i>
+                                    <input type="text" id="netease-link-input" placeholder="粘贴网易云分享链接或ID（支持短链）">
+                                    <button id="netease-link-parse" class="btn-primary"><i class="fas fa-search"></i>
                                         解析</button>
                                 </div>
+                                <!-- <div class="loading-text" style="text-align:left;opacity:0.7;padding:0 0.4rem;">
+                                    支持单曲、歌单长链或 163cn.tv 短链，自动识别类型
+                                </div> -->
                             </div>
 
                             <!-- Tab: Settings -->

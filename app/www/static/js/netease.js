@@ -232,7 +232,7 @@ async function downloadNeteaseSong(song, btnEl) {
                 }
 
                 if (newStatus === 'success') {
-                  showToast(`下载完成: ${tData.title}`);
+                  // showToast(`下载完成: ${tData.title}`);
                   if (songRefreshCallback) songRefreshCallback();
                 } else {
                   showToast(`下载失败: ${tData.message || '未知错误'}`);
@@ -474,44 +474,32 @@ async function checkLoginStatus() {
   }
 }
 
-async function downloadByIds() {
-  const songId = ui.neteaseSongIdInput ? ui.neteaseSongIdInput.value.trim() : '';
-  const playlistId = ui.neteasePlaylistIdInput ? ui.neteasePlaylistIdInput.value.trim() : '';
-  if (!songId && !playlistId) { showToast('请输入单曲ID或歌单ID'); return; }
-  if (songId) {
-    try {
-      if (ui.neteaseResultList) ui.neteaseResultList.innerHTML = '<div class="loading-text">解析单曲中...</div>';
-      const json = await api.netease.song(songId);
-      if (!json.success) { showToast(json.error || '解析失败'); return; }
-      state.neteaseResults = json.data || [];
-      state.neteaseSelected = new Set(state.neteaseResults.map(s => String(s.id)));
-      renderNeteaseResults();
-      if (!state.neteaseResults.length) {
-        if (ui.neteaseResultList) ui.neteaseResultList.innerHTML = '<div class="loading-text">未找到歌曲</div>';
-      } else {
-        showToast(`解析到 ${state.neteaseResults.length} 首歌曲，可选择下载`);
-      }
-    } catch (err) {
-      console.error('song parse error', err);
-      showToast('解析失败');
+async function parseNeteaseLink() {
+  const linkVal = ui.neteaseLinkInput ? ui.neteaseLinkInput.value.trim() : '';
+  if (!linkVal) { showToast('请输入网易云链接或ID'); return; }
+  if (ui.neteaseResultList) ui.neteaseResultList.innerHTML = '<div class="loading-text">解析中...</div>';
+  try {
+    const json = await api.netease.resolve(linkVal);
+    if (!json.success) {
+      showToast(json.error || '解析失败');
+      if (ui.neteaseResultList) ui.neteaseResultList.innerHTML = `<div class="loading-text">${json.error || '解析失败'}</div>`;
+      return;
     }
-  } else if (playlistId) {
-    try {
-      if (ui.neteaseResultList) ui.neteaseResultList.innerHTML = '<div class="loading-text">解析歌单中...</div>';
-      const json = await api.netease.playlist(playlistId);
-      if (!json.success) { showToast(json.error || '获取歌单失败'); return; }
-      state.neteaseResults = json.data || [];
-      state.neteaseSelected = new Set(state.neteaseResults.map(s => String(s.id)));
-      renderNeteaseResults();
-      if (!state.neteaseResults.length) {
-        if (ui.neteaseResultList) ui.neteaseResultList.innerHTML = '<div class="loading-text">歌单为空</div>';
-      } else {
-        showToast(`解析到 ${state.neteaseResults.length} 首歌曲，可选择下载`);
-      }
-    } catch (err) {
-      console.error('playlist download error', err);
-      showToast('解析失败');
+    state.neteaseResults = json.data || [];
+    state.neteaseSelected = new Set(state.neteaseResults.map(s => String(s.id)));
+    renderNeteaseResults();
+    if (!state.neteaseResults.length) {
+      if (ui.neteaseResultList) ui.neteaseResultList.innerHTML = '<div class="loading-text">未找到歌曲</div>';
+    } else {
+      const msg = json.type === 'playlist'
+        ? `已解析歌单${json.name ? `：${json.name}` : ''}（${state.neteaseResults.length} 首）`
+        : `解析到 ${state.neteaseResults.length} 首歌曲，可选择下载`;
+      showToast(msg);
     }
+  } catch (err) {
+    console.error('parse link error', err);
+    showToast('解析失败');
+    if (ui.neteaseResultList) ui.neteaseResultList.innerHTML = '<div class="loading-text">解析失败</div>';
   }
 }
 
@@ -538,7 +526,8 @@ function bindEvents() {
     if (state.neteasePollingTimer) { clearInterval(state.neteasePollingTimer); state.neteasePollingTimer = null; }
   });
   ui.neteaseRefreshStatusBtn?.addEventListener('click', () => refreshLoginStatus(true));
-  ui.neteaseIdDownloadBtn?.addEventListener('click', downloadByIds);
+  ui.neteaseIdDownloadBtn?.addEventListener('click', parseNeteaseLink);
+  ui.neteaseLinkInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') parseNeteaseLink(); });
   ui.neteaseSaveDirBtn?.addEventListener('click', saveNeteaseConfig);
   if (ui.neteaseSelectAll) ui.neteaseSelectAll.addEventListener('change', (e) => {
     if (e.target.checked) state.neteaseSelected = new Set(state.neteaseResults.map(s => String(s.id)));

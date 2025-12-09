@@ -69,6 +69,10 @@ export const api = {
       const res = await fetch(`/api/netease/search?keywords=${encodeURIComponent(keywords)}`);
       return jsonOrThrow(res);
     },
+    async resolve(input) {
+      const res = await fetch(`/api/netease/resolve?input=${encodeURIComponent(input)}`);
+      return jsonOrThrow(res);
+    },
     async download(body) {
       const res = await fetch('/api/netease/download', {
         method: 'POST',

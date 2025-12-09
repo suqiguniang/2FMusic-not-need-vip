@@ -13,7 +13,7 @@ import argparse
 import locale
 import concurrent.futures
 import json
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlparse, parse_qs
 
 if getattr(sys, 'frozen', False):
     # 【打包模式】基准目录是二进制文件所在位置
@@ -583,6 +583,124 @@ def call_netease_api(path: str, params: dict, method: str = 'GET', need_cookie: 
     resp.raise_for_status()
     return resp.json()
 
+def _format_netease_songs(source_tracks):
+    """将网易云接口返回的曲目统一格式化。"""
+    songs = []
+    for item in source_tracks or []:
+        sid = item.get('id')
+        if not sid:
+            continue
+        artists = ' / '.join([a.get('name') for a in item.get('ar', []) if a.get('name')]) or '未知艺术家'
+        album_info = item.get('al') or {}
+        songs.append({
+            'id': sid,
+            'title': item.get('name') or f"未命名 {sid}",
+            'artist': artists,
+            'album': album_info.get('name') or '',
+            'cover': album_info.get('picUrl'),
+            'duration': (item.get('dt') or 0) / 1000
+        })
+    return songs
+
+def _resolve_netease_input(raw: str, prefer: str = None):
+    """支持短链/长链/纯数字的资源解析，返回 {'type': 'song'|'playlist', 'id': '123'}。"""
+    if not raw:
+        return None
+    prefer = prefer if prefer in ('song', 'playlist') else None
+    text = str(raw).strip()
+
+    # 处理纯数字直接返回
+    if text.isdigit():
+        return {'type': prefer or 'song', 'id': text}
+
+    candidate = text
+    # 链接补全 scheme
+    if candidate.startswith(('music.163.com', 'y.music.163.com', '163cn.tv')):
+        candidate = f"https://{candidate}"
+    # 跟随短链跳转获取真实地址
+    if re.match(r'^https?://', candidate, re.I):
+        try:
+            with requests.get(candidate, allow_redirects=True, timeout=8, headers=COMMON_HEADERS, stream=True) as resp:
+                candidate = resp.url or candidate
+        except Exception as e:
+            logger.warning(f"网易云链接解析失败: {e}")
+
+    def extract_from_url(url_str: str):
+        parsed = urlparse(url_str)
+        path = parsed.path or ''
+        fragment = parsed.fragment or ''
+        frag_path, frag_query = '', {}
+        if fragment:
+            if '?' in fragment:
+                frag_path, frag_qs = fragment.split('?', 1)
+                frag_query = parse_qs(frag_qs)
+            else:
+                frag_path = fragment
+        query = parse_qs(parsed.query or '')
+
+        def pick_id(qs):
+            for key in ('id', 'songId', 'playlistId'):
+                if qs.get(key):
+                    return str(qs[key][0])
+            return None
+
+        rid = pick_id(query) or pick_id(frag_query)
+        route_hint = None
+        for seg in (path, frag_path):
+            if 'playlist' in seg:
+                route_hint = 'playlist'; break
+            if 'song' in seg:
+                route_hint = 'song'
+        if not rid:
+            m = re.search(r'/(song|playlist)/(\d+)', path)
+            if not m and frag_path:
+                m = re.search(r'(song|playlist)[^0-9]*(\d+)', frag_path)
+            if m:
+                route_hint = route_hint or m.group(1)
+                rid = m.group(2)
+        if not rid:
+            m = re.search(r'id=(\d+)', url_str)
+            if m:
+                rid = m.group(1)
+        if rid:
+            return {'type': route_hint or prefer or 'song', 'id': rid}
+        return None
+
+    parsed = extract_from_url(candidate)
+    if parsed:
+        return parsed
+
+    # 回退：直接在文本中寻找
+    m = re.search(r'(playlist|song)[^0-9]*(\d+)', text, re.IGNORECASE)
+    if m:
+        return {'type': m.group(1).lower(), 'id': m.group(2)}
+    m = re.search(r'(\d{5,})', text)
+    if m:
+        return {'type': prefer or 'song', 'id': m.group(1)}
+    return None
+
+def _fetch_playlist_songs(playlist_id: str):
+    detail_resp = call_netease_api('/playlist/detail', {'id': playlist_id})
+    playlist = detail_resp.get('playlist') if isinstance(detail_resp, dict) else None
+    if not playlist:
+        raise Exception('无法获取歌单信息')
+    track_ids = [t.get('id') for t in playlist.get('trackIds', []) if t.get('id')]
+    tracks = playlist.get('tracks') or []
+    if not tracks and track_ids:
+        ids_str = ','.join(map(str, track_ids[:300]))  # protect from huge lists
+        song_detail = call_netease_api('/song/detail', {'ids': ids_str})
+        tracks = song_detail.get('songs', []) if isinstance(song_detail, dict) else []
+    songs = _format_netease_songs(tracks)
+    return songs, playlist.get('name')
+
+def _fetch_song_detail(song_id: str):
+    detail_resp = call_netease_api('/song/detail', {'ids': song_id})
+    songs = detail_resp.get('songs', []) if isinstance(detail_resp, dict) else []
+    parsed = _format_netease_songs(songs)
+    if not parsed:
+        raise Exception('未获取到歌曲信息')
+    return parsed
+
 # 预加载网易云 cookie
 load_netease_config()
 load_netease_cookie()
@@ -878,45 +996,33 @@ def netease_debug():
         info['cookie_keys'] = list(parsed.keys())
     return jsonify(info)
 
+@app.route('/api/netease/resolve')
+def netease_resolve():
+    """通过分享链接或ID自动识别资源并返回歌曲列表。"""
+    raw_input = request.args.get('input') or request.args.get('link') or request.args.get('id')
+    parsed_input = _resolve_netease_input(raw_input)
+    if not parsed_input:
+        return jsonify({'success': False, 'error': '请粘贴网易云分享链接或输入ID'})
+    try:
+        if parsed_input['type'] == 'playlist':
+            songs, name = _fetch_playlist_songs(parsed_input['id'])
+            return jsonify({'success': True, 'type': 'playlist', 'id': parsed_input['id'], 'name': name, 'data': songs})
+        songs = _fetch_song_detail(parsed_input['id'])
+        return jsonify({'success': True, 'type': 'song', 'id': parsed_input['id'], 'data': songs})
+    except Exception as e:
+        logger.warning(f"解析网易云链接失败: {e}")
+        return jsonify({'success': False, 'error': '解析失败，请确认链接或ID有效'})
+
 @app.route('/api/netease/playlist')
 def netease_playlist_detail():
     """获取歌单详情及歌曲列表。"""
-    playlist_id = request.args.get('id')
-    if not playlist_id:
-        return jsonify({'success': False, 'error': '缺少歌单ID'})
+    raw_input = request.args.get('id') or request.args.get('link') or request.args.get('input')
+    parsed_input = _resolve_netease_input(raw_input, prefer='playlist')
+    if not parsed_input or parsed_input.get('type') != 'playlist':
+        return jsonify({'success': False, 'error': '缺少歌单链接或无法识别'})
     try:
-        detail_resp = call_netease_api('/playlist/detail', {'id': playlist_id})
-        playlist = detail_resp.get('playlist') if isinstance(detail_resp, dict) else None
-        if not playlist:
-            return jsonify({'success': False, 'error': '无法获取歌单信息'})
-        track_ids = [t.get('id') for t in playlist.get('trackIds', []) if t.get('id')]
-        tracks = playlist.get('tracks') or []
-        songs = []
-        if tracks:
-            source_tracks = tracks
-        else:
-            # fallback fetch song detail by ids (limited length)
-            if track_ids:
-                ids_str = ','.join(map(str, track_ids[:300]))  # protect from huge lists
-                song_detail = call_netease_api('/song/detail', {'ids': ids_str})
-                source_tracks = song_detail.get('songs', []) if isinstance(song_detail, dict) else []
-            else:
-                source_tracks = []
-        for item in source_tracks:
-            sid = item.get('id')
-            if not sid:
-                continue
-            artists = ' / '.join([a.get('name') for a in item.get('ar', []) if a.get('name')]) or '未知艺术家'
-            album_info = item.get('al') or {}
-            songs.append({
-                'id': sid,
-                'title': item.get('name') or f"未命名 {sid}",
-                'artist': artists,
-                'album': album_info.get('name') or '',
-                'cover': album_info.get('picUrl'),
-                'duration': (item.get('dt') or 0) / 1000
-            })
-        return jsonify({'success': True, 'name': playlist.get('name'), 'data': songs})
+        songs, name = _fetch_playlist_songs(parsed_input['id'])
+        return jsonify({'success': True, 'name': name, 'id': parsed_input['id'], 'data': songs})
     except Exception as e:
         logger.warning(f"歌单获取失败: {e}")
         return jsonify({'success': False, 'error': '获取歌单失败'})
@@ -924,30 +1030,15 @@ def netease_playlist_detail():
 @app.route('/api/netease/song')
 def netease_song_detail():
     """根据单曲ID获取歌曲详情，用于解析而非直接下载。"""
-    song_id = request.args.get('id')
-    if not song_id:
-        return jsonify({'success': False, 'error': '缺少歌曲ID'})
+    raw_input = request.args.get('id') or request.args.get('link') or request.args.get('input')
+    parsed_input = _resolve_netease_input(raw_input, prefer='song')
+    if not parsed_input:
+        return jsonify({'success': False, 'error': '缺少歌曲链接或ID'})
+    if parsed_input.get('type') == 'playlist':
+        return jsonify({'success': False, 'error': '检测到歌单链接，请切换歌单解析'})
     try:
-        detail_resp = call_netease_api('/song/detail', {'ids': song_id})
-        songs = detail_resp.get('songs', []) if isinstance(detail_resp, dict) else []
-        parsed = []
-        for item in songs:
-            sid = item.get('id')
-            if not sid:
-                continue
-            artists = ' / '.join([a.get('name') for a in item.get('ar', []) if a.get('name')]) or '未知艺术家'
-            album_info = item.get('al') or {}
-            parsed.append({
-                'id': sid,
-                'title': item.get('name') or f"未命名 {sid}",
-                'artist': artists,
-                'album': album_info.get('name') or '',
-                'cover': album_info.get('picUrl'),
-                'duration': (item.get('dt') or 0) / 1000
-            })
-        if not parsed:
-            return jsonify({'success': False, 'error': '未获取到歌曲信息'})
-        return jsonify({'success': True, 'data': parsed})
+        parsed = _fetch_song_detail(parsed_input['id'])
+        return jsonify({'success': True, 'id': parsed_input['id'], 'data': parsed})
     except Exception as e:
         logger.warning(f"获取单曲详情失败: {e}")
         return jsonify({'success': False, 'error': '获取歌曲信息失败'})
