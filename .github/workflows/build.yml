@@ -1,0 +1,103 @@
+name: Auto Build 2FMusic (Binary)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # 1. 从 manifest 提取版本号
+    - name: Extract Version from Manifest
+      id: version
+      run: |
+        # 查找以 version 开头的行，以 = 分割，打印第二部分，并去除首尾空格
+        VERSION=$(grep "^version" manifest | awk -F'=' '{print $2}' | xargs)
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        echo "🎯 Detected version: ${VERSION}"
+
+    # 2. 设置 Python 环境
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    # 3. 安装依赖 (PyInstaller 和 项目依赖)
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        # 安装项目运行所需的依赖，以便 PyInstaller 能打包它们
+        if [ -f app/server/requirements.txt ]; then pip install -r app/server/requirements.txt; fi
+
+    # 4. 编译二进制并清理
+    - name: Compile and Cleanup
+      run: |
+        echo "🔨 Compiling app.py..."
+        # 编译为单文件，输出到 app/server/app
+        pyinstaller --clean --onefile --name "app" --distpath "app/server" "app/server/app.py"
+        
+        # 赋予执行权限
+        chmod +x app/server/app
+        
+        echo "🧹 Cleaning up..."
+        # 清理编译临时文件
+        rm -rf build/
+        rm -f app.spec
+        
+        # 删除源码和不再需要的依赖库文件夹
+        rm -f app/server/app.py
+        rm -rf app/server/lib
+        
+        echo "✅ Compilation and cleanup complete."
+
+    # 5. 安装 fnpack
+    - name: Install fnpack
+      run: |
+        wget https://static2.fnnas.com/fnpack/fnpack-1.0.4-linux-amd64 -O fnpack
+        chmod +x fnpack
+        sudo mv fnpack /usr/local/bin/
+
+    # 6. 构建 fpk 包
+    - name: Build fpk package
+      id: build
+      run: |
+        fnpack build
+        FPK_FILE=$(ls *.fpk | head -n 1)
+        echo "fpk_file=${FPK_FILE}" >> $GITHUB_OUTPUT
+        echo "📦 FPK package built: ${FPK_FILE}"
+
+    # 7. 删除旧的同版本 Pre-release
+    - name: Delete old pre-releases
+      run: |
+        TAG="v${{ steps.version.outputs.version }}-pre"
+        echo "Checking for old release with tag: $TAG"
+        gh release delete "$TAG" --yes || true
+        git push --delete origin "$TAG" || true
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    # 8. 创建 Pre-release
+    - name: Create Pre-release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ steps.version.outputs.version }}-pre
+        name: 2FMusic ${{ steps.version.outputs.version }} (Binary Pre-release)
+        body: |
+          ## 🚀 Auto-built Binary Release
+
+          **Version**: ${{ steps.version.outputs.version }}
+          
+          此版本由 GitHub Actions 自动构建
+
+        files: ${{ steps.build.outputs.fpk_file }}
+        prerelease: true
+        draft: false
