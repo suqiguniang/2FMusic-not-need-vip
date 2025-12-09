@@ -1,4 +1,4 @@
-name: Auto Build 2FMusic (Dual Versions)
+name: Auto Build 2FMusic
 
 on:
   workflow_dispatch:
@@ -108,7 +108,7 @@ jobs:
         fnpack build
         
         # 重命名生成的包
-        BINARY_FPK_NAME="2fmusic-${{ steps.version.outputs.version }}_amd64.fpk"
+        BINARY_FPK_NAME="2fmusic-${{ steps.version.outputs.version }}-amd64.fpk"
         
         if [ -f "2fmusic.fpk" ]; then
           mv 2fmusic.fpk "$BINARY_FPK_NAME"
@@ -142,14 +142,12 @@ jobs:
 
           此 Release 包含两个版本的安装包：
 
-          ### 1. 🐍 Python Source Version (`-python_src.fpk`)
+          ### 1. 🐍 Python Source Version (`-python.fpk`)
           - **文件**: `${{ steps.build_source.outputs.source_pkg }}`
-          - **说明**: 使用仓库自带 `lib` 库，保留 `app.py` 源码。
           - **依赖**: 依赖系统 Python 环境 (`python312`)。
           
-          ### 2. ⚡ Binary Version (`-bin_amd64.fpk`)
+          ### 2. ⚡ Binary Version (`-amd64.fpk`)
           - **文件**: `${{ steps.build_binary.outputs.binary_pkg }}`
-          - **说明**: 核心已编译为二进制文件，**不含源码**，启动更快。
           - **依赖**: **无需**系统 Python 环境。
 
           ### ⚠️ Notes
