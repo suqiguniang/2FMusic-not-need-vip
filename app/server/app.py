@@ -88,6 +88,8 @@ SCAN_STATUS = {
     'current_file': ''
 }
 
+DOWNLOAD_TASKS = {} # task_id -> {status, progress, message, filename}
+
 # 修复路径问题
 app = Flask(__name__, static_folder=STATIC_DIR, template_folder=TEMPLATE_DIR)
 
@@ -166,6 +168,26 @@ def get_metadata(file_path):
     if not metadata['artist']: metadata['artist'] = "未知艺术家"
     logger.debug(f"文件 {file_path} 元数据: {metadata}")
     return metadata
+
+def index_single_file(file_path):
+    """单独索引一个文件，不进行全盘扫描。"""
+    try:
+        if not os.path.exists(file_path): return
+        
+        stat = os.stat(file_path)
+        meta = get_metadata(file_path)
+        base = os.path.splitext(os.path.basename(file_path))[0]
+        has_cover = 1 if os.path.exists(os.path.join(MUSIC_LIBRARY_PATH, 'covers', f"{base}.jpg")) else 0
+        
+        with get_db() as conn:
+            conn.execute('''
+                INSERT OR REPLACE INTO songs (filename, title, artist, album, mtime, size, has_cover)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (os.path.basename(file_path), meta['title'], meta['artist'], meta['album'], stat.st_mtime, stat.st_size, has_cover))
+            conn.commit()
+        logger.info(f"单文件索引完成: {file_path}")
+    except Exception as e:
+        logger.error(f"单文件索引失败: {e}")
 
 # --- 优化后的并发扫描逻辑 ---
 def scan_library_incremental():
@@ -365,6 +387,9 @@ def add_mount_point():
                         if lower_f.endswith(audio_exts) or lower_f.endswith(misc_exts):
                             total_files += 1
                 SCAN_STATUS['total'] = total_files
+                
+                # 预先设置 processed 为 0，避免闪烁
+                SCAN_STATUS['processed'] = 0
                 
                 # 第二步：执行处理
                 added = []
@@ -694,7 +719,8 @@ def upload_file():
         save_path = os.path.join(MUSIC_LIBRARY_PATH, filename)
         try:
             file.save(save_path)
-            scan_library_incremental()
+            # 使用单文件索引，不再全量扫描
+            threading.Thread(target=index_single_file, args=(save_path,), daemon=True).start()
             return jsonify({'success': True})
         except Exception as e: return jsonify({'success': False, 'error': str(e)})
     return jsonify({'success': False, 'error': '未知错误'})
@@ -709,7 +735,7 @@ def import_music_by_path():
         dst_path = os.path.join(MUSIC_LIBRARY_PATH, filename)
         if not os.path.exists(dst_path):
             shutil.copy2(src_path, dst_path)
-            scan_library_incremental()
+            threading.Thread(target=index_single_file, args=(dst_path,), daemon=True).start()
         return jsonify({'success': True, 'filename': filename})
     except Exception as e: return jsonify({'success': False, 'error': str(e)})
 
@@ -926,20 +952,53 @@ def netease_song_detail():
         logger.warning(f"获取单曲详情失败: {e}")
         return jsonify({'success': False, 'error': '获取歌曲信息失败'})
 
+        # 索引文件
+        index_single_file(target_path)
+        
+        DOWNLOAD_TASKS[task_id]['status'] = 'success'
+        DOWNLOAD_TASKS[task_id]['progress'] = 100
+        logger.info(f"网易云歌曲已下载: {filename} | {title} - {artist}")
+        
+    except Exception as e:
+        logger.warning(f"网易云下载失败: {e}")
+        DOWNLOAD_TASKS[task_id]['status'] = 'error'
+        DOWNLOAD_TASKS[task_id]['message'] = str(e)
+    finally:
+        # 10分钟后清理任务状态
+        def clean_task():
+            time.sleep(600)
+            DOWNLOAD_TASKS.pop(task_id, None)
+        threading.Thread(target=clean_task, daemon=True).start()
+
 @app.route('/api/netease/download', methods=['POST'])
 def download_netease_music():
-    """根据歌曲ID下载网易云音乐到本地库。"""
+    """根据歌曲ID下载网易云音乐到本地库。(异步)"""
     payload = request.json or {}
     song_id = payload.get('id')
     if not song_id:
         return jsonify({'success': False, 'error': '缺少歌曲ID'})
+    
+    task_id = f"task_{int(time.time()*1000)}_{os.urandom(4).hex()}"
+    DOWNLOAD_TASKS[task_id] = {
+        'status': 'pending', 
+        'progress': 0, 
+        'title': payload.get('title', '未知'),
+        'artist': payload.get('artist', '未知')
+    }
+    
+    threading.Thread(target=run_download_task, args=(task_id, payload), daemon=True).start()
+    return jsonify({'success': True, 'task_id': task_id})
 
+def run_download_task(task_id, payload):
+    song_id = payload.get('id')
     title = (payload.get('title') or '').strip()
     artist = (payload.get('artist') or '').strip()
     album = (payload.get('album') or '').strip()
     level = payload.get('level') or 'exhigh'
     target_dir = payload.get('target_dir') or NETEASE_DOWNLOAD_DIR
     target_dir = os.path.abspath(target_dir)
+    
+    DOWNLOAD_TASKS[task_id]['status'] = 'downloading'
 
     try:
         os.makedirs(target_dir, exist_ok=True)
@@ -959,6 +1018,10 @@ def download_netease_music():
             artist = '未知艺术家'
         if 'base_filename' not in locals() or not base_filename:
             base_filename = sanitize_filename(payload.get('filename') or f"{artist} - {title}")
+            
+        # 更新任务信息
+        DOWNLOAD_TASKS[task_id]['title'] = title
+        DOWNLOAD_TASKS[task_id]['artist'] = artist
 
         api_resp = call_netease_api('/song/url/v1', {'id': song_id, 'level': level})
         data_list = api_resp.get('data') if isinstance(api_resp, dict) else None
@@ -969,7 +1032,7 @@ def download_netease_music():
             track_info = data_list
 
         if not track_info or (not track_info.get('url') and not track_info.get('proxyUrl')):
-            return jsonify({'success': False, 'error': '暂无可用下载地址，可能需要切换音质或登录'})
+            raise Exception('暂无可用下载地址，可能需要切换音质或登录')
 
         download_url = track_info.get('url') or track_info.get('proxyUrl')
         ext = (track_info.get('type') or track_info.get('encodeType') or 'mp3').lower()
@@ -986,23 +1049,48 @@ def download_netease_music():
         try:
             with requests.get(download_url, stream=True, timeout=20, headers=COMMON_HEADERS) as resp:
                 resp.raise_for_status()
+                total_size = int(resp.headers.get('content-length', 0))
+                downloaded = 0
+                
                 with open(tmp_path, 'wb') as f:
                     for chunk in resp.iter_content(chunk_size=8192):
                         if chunk:
                             f.write(chunk)
+                            downloaded += len(chunk)
+                            if total_size > 0:
+                                progress = int((downloaded / total_size) * 100)
+                                DOWNLOAD_TASKS[task_id]['progress'] = progress
+                                
             shutil.move(tmp_path, target_path)
         finally:
             if os.path.exists(tmp_path):
                 try: os.remove(tmp_path)
                 except: pass
 
-        # 触发扫描以更新列表
-        threading.Thread(target=scan_library_incremental, daemon=True).start()
+        # 索引文件
+        index_single_file(target_path)
+        
+        DOWNLOAD_TASKS[task_id]['status'] = 'success'
+        DOWNLOAD_TASKS[task_id]['progress'] = 100
         logger.info(f"网易云歌曲已下载: {filename} | {title} - {artist}")
-        return jsonify({'success': True, 'filename': filename, 'title': title, 'artist': artist, 'album': album})
+        
     except Exception as e:
         logger.warning(f"网易云下载失败: {e}")
-        return jsonify({'success': False, 'error': '下载失败，请检查网易云 API 服务或网络'})
+        DOWNLOAD_TASKS[task_id]['status'] = 'error'
+        DOWNLOAD_TASKS[task_id]['message'] = str(e)
+    finally:
+        # 10分钟后清理任务状态
+        def clean_task():
+            time.sleep(600)
+            DOWNLOAD_TASKS.pop(task_id, None)
+        threading.Thread(target=clean_task, daemon=True).start()
+
+@app.route('/api/netease/task/<task_id>')
+def get_netease_task_status(task_id):
+    task = DOWNLOAD_TASKS.get(task_id)
+    if not task:
+        return jsonify({'success': False, 'error': '任务不存在'})
+    return jsonify({'success': True, 'data': task})
 
 @app.route('/api/music/external/meta')
 def get_external_meta():

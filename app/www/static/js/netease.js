@@ -4,6 +4,8 @@ import { api } from './api.js';
 import { showToast, hideProgressToast, formatTime } from './utils.js';
 
 // 网易云业务
+let songRefreshCallback = null;
+
 function renderDownloadTasks() {
   const list = ui.neteaseDownloadList;
   const tasks = state.neteaseDownloadTasks;
@@ -28,7 +30,11 @@ function renderDownloadTasks() {
       error: { icon: 'fas fa-times', text: '失败', class: 'status-error' }
     }[task.status] || { icon: 'fas fa-question', text: '未知', class: '' };
     statusEl.className = `download-status ${config.class}`;
-    statusEl.innerHTML = `<i class="${config.icon}"></i> <span>${config.text}</span>`;
+    if (task.status === 'downloading') {
+      statusEl.innerHTML = `<i class="${config.icon}"></i> <span>${task.progress || 0}%</span>`;
+    } else {
+      statusEl.innerHTML = `<i class="${config.icon}"></i> <span>${config.text}</span>`;
+    }
     row.appendChild(meta);
     row.appendChild(statusEl);
     frag.appendChild(row);
@@ -126,14 +132,50 @@ async function downloadNeteaseSong(song, btnEl) {
   if (!song || !song.id) return;
   const level = ui.neteaseQualitySelect ? ui.neteaseQualitySelect.value : 'exhigh';
   const taskId = addDownloadTask(song);
-  updateDownloadTask(taskId, 'downloading');
-  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="fas fa-sync fa-spin"></i> 下载中'; }
+
+  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="fas fa-sync fa-spin"></i> 请求中'; }
+
   try {
     const res = await api.netease.download({ ...song, level, target_dir: state.neteaseDownloadDir || undefined });
     if (res.success) {
-      updateDownloadTask(taskId, 'success');
+      const backendTaskId = res.task_id;
+      updateDownloadTask(taskId, 'downloading');
+
+      // 轮询进度
+      const pollTimer = setInterval(async () => {
+        try {
+          const taskRes = await api.netease.task(backendTaskId);
+          if (taskRes.success) {
+            const tData = taskRes.data;
+            const currentTask = state.neteaseDownloadTasks.find(t => t.id === taskId);
+            if (currentTask) {
+              // 状态映射
+              let newStatus = tData.status;
+              if (newStatus === 'pending') newStatus = 'queued';
+
+              currentTask.status = newStatus;
+              currentTask.progress = tData.progress;
+              renderDownloadTasks();
+
+              if (newStatus === 'success' || newStatus === 'error') {
+                clearInterval(pollTimer);
+                if (newStatus === 'success') {
+                  showToast(`下载完成: ${tData.title}`);
+                  if (songRefreshCallback) songRefreshCallback();
+                } else {
+                  showToast(`下载失败: ${tData.message || '未知错误'}`);
+                }
+              }
+            } else {
+              clearInterval(pollTimer);
+            }
+          }
+        } catch (e) { console.error(e); }
+      }, 1000);
+
     } else {
       updateDownloadTask(taskId, 'error');
+      showToast(res.error || '请求失败');
     }
   } catch (err) {
     console.error('download netease error', err);
@@ -407,7 +449,8 @@ function bindEvents() {
   }
 }
 
-export async function initNetease() {
+export async function initNetease(onRefreshSongs) {
+  songRefreshCallback = onRefreshSongs;
   bindEvents();
   await loadNeteaseConfig();
   renderDownloadTasks();

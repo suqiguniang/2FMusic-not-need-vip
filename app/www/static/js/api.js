@@ -108,6 +108,10 @@ export const api = {
     async song(id) {
       const res = await fetch(`/api/netease/song?id=${encodeURIComponent(id)}`);
       return jsonOrThrow(res);
+    },
+    async task(taskId) {
+      const res = await fetch(`/api/netease/task/${encodeURIComponent(taskId)}`);
+      return jsonOrThrow(res);
     }
   }
 };
