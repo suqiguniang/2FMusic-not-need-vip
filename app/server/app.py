@@ -15,10 +15,14 @@ import concurrent.futures
 import json
 from urllib.parse import quote, unquote
 
-# 从 lib 目录导入第三方库
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-LIB_DIR = os.path.join(CURRENT_DIR, 'lib')
-sys.path.insert(0, LIB_DIR)
+if getattr(sys, 'frozen', False):
+    # 【打包模式】基准目录是二进制文件所在位置
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    # 【源码模式】基准目录是脚本所在位置
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    # 仅在源码模式下加载 lib
+    sys.path.insert(0, os.path.join(BASE_DIR, 'lib'))
 
 try:
     from flask import Flask, render_template, request, jsonify, send_file, redirect
@@ -28,6 +32,10 @@ try:
 except ImportError as e:
     print(f"错误：无法导入依赖库。\n详情: {e}")
     sys.exit(1)
+
+# 计算 www 的绝对路径
+TEMPLATE_DIR = os.path.abspath(os.path.join(BASE_DIR, '../www/templates'))
+STATIC_DIR = os.path.abspath(os.path.join(BASE_DIR, '../www/static'))
 
 # --- 环境配置 ---
 os.environ['PYTHONIOENCODING'] = 'utf-8'
@@ -80,7 +88,8 @@ SCAN_STATUS = {
     'current_file': ''
 }
 
-app = Flask(__name__, static_folder='../www/static', template_folder='../www/templates')
+# 修复路径问题
+app = Flask(__name__, static_folder=STATIC_DIR, template_folder=TEMPLATE_DIR)
 
 # --- 数据库管理 ---
 def get_db():
