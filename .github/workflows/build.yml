@@ -59,8 +59,15 @@ jobs:
         fnpack build
         
         # 重命名生成的包
-        SOURCE_FPK_NAME="2fmusic-${{ steps.version.outputs.version }}-python_src.fpk"
-        mv *.fpk "$SOURCE_FPK_NAME"
+        SOURCE_FPK_NAME="2fmusic-${{ steps.version.outputs.version }}-python.fpk"
+        
+        # Check if file exists to be safe
+        if [ -f "2fmusic.fpk" ]; then
+          mv 2fmusic.fpk "$SOURCE_FPK_NAME"
+        else
+          echo "Error: 2fmusic.fpk not found!"
+          exit 1
+        fi
         
         echo "source_pkg=${SOURCE_FPK_NAME}" >> $GITHUB_OUTPUT
         echo "✅ Generated: $SOURCE_FPK_NAME"
@@ -86,7 +93,7 @@ jobs:
         rm -rf app/server/lib
         
         echo "📝 Modifying manifest (Remove Python dependency)..."
-        # 从 manifest 中删除 install_dep_apps 这一行，因为二进制版不需要系统安装 python
+        # 从 manifest 中删除 install_dep_apps 这一行
         sed -i '/install_dep_apps/d' manifest
         
         echo "✅ Ready for Binary Build."
@@ -101,8 +108,14 @@ jobs:
         fnpack build
         
         # 重命名生成的包
-        BINARY_FPK_NAME="2fmusic-${{ steps.version.outputs.version }}-bin_amd64.fpk"
-        mv *.fpk "$BINARY_FPK_NAME"
+        BINARY_FPK_NAME="2fmusic-${{ steps.version.outputs.version }}_amd64.fpk"
+        
+        if [ -f "2fmusic.fpk" ]; then
+          mv 2fmusic.fpk "$BINARY_FPK_NAME"
+        else
+          echo "Error: 2fmusic.fpk not found!"
+          exit 1
+        fi
         
         echo "binary_pkg=${BINARY_FPK_NAME}" >> $GITHUB_OUTPUT
         echo "✅ Generated: $BINARY_FPK_NAME"
