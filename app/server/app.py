@@ -1194,7 +1194,7 @@ def netease_resolve():
         return jsonify({'success': True, 'type': 'song', 'id': parsed_input['id'], 'data': songs})
     except Exception as e:
         logger.warning(f"解析网易云链接失败: {e}")
-        return jsonify({'success': False, 'error': '解析失败，请确认链接或ID有效'})
+        return jsonify({'success': False, 'error': '解析失败，请确认歌曲或歌单链接有效'})
 
 @app.route('/api/netease/playlist')
 def netease_playlist_detail():
