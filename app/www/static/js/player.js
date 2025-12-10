@@ -485,7 +485,7 @@ async function checkAndFetchMetadata(track, fetchId) {
       if (d.success && d.album_art) {
         track.cover = d.album_art;
         savePlaylist(); // 保存封面更新
-        if (ui.audio.src.includes(encodeURIComponent(track.filename))) { ['current-cover', 'fp-cover'].forEach(id => { const el = document.getElementById(id); if (el) el.src = track.cover; }); }
+        if (ui.audio.src.includes(encodeURIComponent(track.id))) { ['current-cover', 'fp-cover'].forEach(id => { const el = document.getElementById(id); if (el) el.src = track.cover; }); }
         renderPlaylist();
       }
     } catch (e) { }
