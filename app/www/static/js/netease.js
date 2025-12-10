@@ -5,6 +5,7 @@ import { showToast, showConfirmDialog, hideProgressToast, formatTime } from './u
 
 // 网易云业务
 let songRefreshCallback = null;
+let recommendLoading = false;
 
 function syncDownloadLimitUI(value) {
   const select = ui.neteaseDownloadLimitSelect;
@@ -133,13 +134,38 @@ function renderNeteaseResults() {
   const list = ui.neteaseResultList;
   if (!list) return;
   if (!state.neteaseResults.length) {
-    list.innerHTML = '<div class="loading-text">未找到相关歌曲</div>';
+    const isRecommend = state.neteaseResultSource === 'recommend';
+    list.innerHTML = isRecommend
+      ? `<div class="netease-empty-state">
+            <div class="empty-title">暂无推荐</div>
+            <div class="empty-desc">请先登录网易云账号获取每日推荐</div>
+         </div>`
+      : '<div class="loading-text">未找到相关歌曲</div>';
     toggleBulkActions(false);
     updateSelectAllState();
     return;
   }
   list.innerHTML = '';
   const frag = document.createDocumentFragment();
+
+  // 推荐列表标题
+  if (state.neteaseResultSource === 'recommend') {
+    const head = document.createElement('div');
+    head.className = 'netease-recommend-head';
+    head.innerHTML = `
+      <div class="netease-recommend-text">
+        <div class="recommend-title">每日推荐</div>
+      </div>
+    `;
+    const btn = head.querySelector('button');
+    btn?.addEventListener('click', () => loadDailyRecommendations(true));
+    frag.appendChild(head);
+  }
+
+  if (ui.neteaseBulkActions) {
+    frag.appendChild(ui.neteaseBulkActions);
+  }
+
   state.neteaseResults.forEach(song => {
     const card = document.createElement('div');
     card.className = 'netease-card';
@@ -375,6 +401,7 @@ async function searchNeteaseSongs() {
   if (!ui.neteaseKeywordsInput) return;
   const inputVal = ui.neteaseKeywordsInput.value.trim();
   if (!inputVal) { showToast('请输入关键词或链接'); return; }
+  state.neteaseResultSource = 'search';
 
   // Clear previous results and show loading
   if (ui.neteaseResultList) {
@@ -426,6 +453,59 @@ async function searchNeteaseSongs() {
     console.error('NetEase search failed', err);
     if (ui.neteaseResultList) ui.neteaseResultList.innerHTML = '<div class="loading-text">搜索失败，请检查 API 服务</div>';
     toggleBulkActions(false);
+  }
+}
+
+async function loadDailyRecommendations(forceReload = false) {
+  if (recommendLoading) return;
+  if (!forceReload && state.neteaseRecommendations.length) {
+    state.neteaseResults = state.neteaseRecommendations;
+    state.neteaseResultSource = 'recommend';
+    state.neteaseSelected = new Set();
+    renderNeteaseResults();
+    return;
+  }
+
+  recommendLoading = true;
+  if (ui.neteaseResultList && (state.neteaseResultSource === 'recommend' || !state.neteaseResults.length)) {
+    ui.neteaseResultList.innerHTML = `
+      <div class="netease-empty-state" style="opacity:0.8; padding: 2rem;">
+        <div class="loading-spinner" style="width:2rem;height:2rem;margin-bottom:1rem;"></div>
+        <div class="loading-text">正在获取每日推荐...</div>
+      </div>`;
+    toggleBulkActions(false);
+  }
+
+  try {
+    const json = await api.netease.recommend();
+    if (json.success) {
+      state.neteaseRecommendations = json.data || [];
+      state.neteaseResults = state.neteaseRecommendations;
+      state.neteaseResultSource = 'recommend';
+      state.neteaseSelected = new Set();
+      renderNeteaseResults();
+    } else {
+      if (ui.neteaseResultList && (state.neteaseResultSource === 'recommend' || !state.neteaseResults.length)) {
+        ui.neteaseResultList.innerHTML = `
+          <div class="netease-empty-state">
+            <div class="empty-title">无法获取推荐</div>
+            <div class="empty-desc">${json.error || '请检查登录状态或 API 服务'}</div>
+          </div>`;
+      }
+      toggleBulkActions(false);
+    }
+  } catch (err) {
+    console.error('load recommend failed', err);
+    if (ui.neteaseResultList && (state.neteaseResultSource === 'recommend' || !state.neteaseResults.length)) {
+      ui.neteaseResultList.innerHTML = `
+        <div class="netease-empty-state">
+          <div class="empty-title">获取推荐失败</div>
+          <div class="empty-desc">请检查网络或重新登录后重试</div>
+        </div>`;
+    }
+    toggleBulkActions(false);
+  } finally {
+    recommendLoading = false;
   }
 }
 
@@ -589,6 +669,9 @@ async function refreshLoginStatus(showToastMsg = false) {
       localStorage.setItem('2fmusic_netease_user', JSON.stringify(user));
 
       renderLoginSuccessUI(user);
+      if (state.neteaseResultSource === 'recommend' || !state.neteaseResults.length) {
+        loadDailyRecommendations(true);
+      }
       if (showToastMsg) showToast('网易云已登录');
     } else {
       state.neteaseUser = null;
@@ -653,6 +736,7 @@ async function checkLoginStatus() {
 async function parseNeteaseLink() {
   const linkVal = ui.neteaseLinkInput ? ui.neteaseLinkInput.value.trim() : '';
   if (!linkVal) { showToast('请输入网易云链接或ID'); return; }
+  state.neteaseResultSource = 'search';
   if (ui.neteaseResultList) ui.neteaseResultList.innerHTML = '<div class="loading-text">解析中...</div>';
   toggleBulkActions(false);
   try {
@@ -707,6 +791,10 @@ function logoutNetease() {
     .finally(() => {
       state.neteaseUser = null;
       localStorage.removeItem('2fmusic_netease_user');
+      state.neteaseRecommendations = [];
+      state.neteaseResults = [];
+      state.neteaseResultSource = 'recommend';
+      renderNeteaseResults();
       toggleLoginUI(false);
       showToast('已退出网易云');
     });
@@ -896,4 +984,5 @@ export async function initNetease(onRefreshSongs) {
   // 2. Background Validation
   await loadNeteaseConfig();
   renderDownloadTasks();
+  loadDailyRecommendations();
 }

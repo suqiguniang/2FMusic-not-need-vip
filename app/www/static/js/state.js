@@ -14,6 +14,8 @@ export const state = {
   savedState: JSON.parse(localStorage.getItem('2fmusic_state') || '{}'),
   currentTab: JSON.parse(localStorage.getItem('2fmusic_state') || '{}').tab || 'local',
   neteaseResults: [],
+  neteaseRecommendations: [],
+  neteaseResultSource: 'recommend',
   neteasePollingTimer: null,
   currentLoginKey: null,
   neteaseDownloadDir: '',

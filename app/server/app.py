@@ -1067,6 +1067,20 @@ def search_netease_music():
         logger.warning(f"网易云搜索失败: {e}")
         return jsonify({'success': False, 'error': '搜索失败，请检查网易云 API 服务'})
 
+@app.route('/api/netease/recommend')
+def netease_daily_recommend():
+    """获取每日推荐歌曲，需要已登录网易云账号。"""
+    try:
+        api_resp = call_netease_api('/recommend/songs', {'timestamp': int(time.time() * 1000)}, need_cookie=True)
+        if isinstance(api_resp, dict) and api_resp.get('code') == 301:
+            return jsonify({'success': False, 'error': '需要登录以获取每日推荐'})
+        daily = (api_resp.get('data') or {}).get('dailySongs', []) if isinstance(api_resp, dict) else []
+        songs = _format_netease_songs(daily)
+        return jsonify({'success': True, 'data': songs})
+    except Exception as e:
+        logger.warning(f"获取每日推荐失败: {e}")
+        return jsonify({'success': False, 'error': '获取每日推荐失败，请检查登录状态或 API 服务'})
+
 @app.route('/api/netease/login/status')
 def netease_login_status():
     """检测当前 cookie 是否已登录。"""
