@@ -2780,3 +2780,22 @@ select:focus {
         width: auto;
     }
 }
+
+/* Mobile optimizations for top spacing */
+@media (max-width: 768px) {
+    /* Hide header completely for Favorites tab to remove gap */
+    .tab-fav .content-header {
+        display: none !important;
+    }
+
+    /* Reduce NetEase title block margin */
+    #netease-content .section-title {
+        margin-bottom: 0.2rem !important;
+    }
+}
+
+/* Override for NetEase path row with label */
+.netease-path-row {
+    grid-template-columns: auto 1fr auto !important;
+    align-items: center;
+}

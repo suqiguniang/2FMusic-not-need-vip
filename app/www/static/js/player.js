@@ -214,6 +214,16 @@ function switchTab(tab) {
     ui.viewMount?.classList.add('hidden');
     ui.viewNetease?.classList.add('hidden');
     ui.viewPlayer?.classList.remove('hidden');
+
+    // Styling hooks for CSS
+    if (tab === 'fav') {
+      ui.viewPlayer?.classList.add('tab-fav');
+      ui.viewPlayer?.classList.remove('tab-local');
+    } else {
+      ui.viewPlayer?.classList.add('tab-local');
+      ui.viewPlayer?.classList.remove('tab-fav');
+    }
+
     renderPlaylist();
     // Update Desktop Title
     const titleEl = document.getElementById('list-title');
@@ -232,10 +242,12 @@ function switchTab(tab) {
   // Search Box Visibility: Only for Local Music
   if (ui.searchInput && ui.searchInput.parentElement) {
     if (tab === 'local') {
-      ui.searchInput.parentElement.style.visibility = 'visible';
+      ui.searchInput.parentElement.style.display = 'flex';
+      // Give a small delay to allow display:flex to apply before opacity transition if we were to keep opacity, 
+      // but for now just show it.
       ui.searchInput.parentElement.style.opacity = '1';
     } else {
-      ui.searchInput.parentElement.style.visibility = 'hidden';
+      ui.searchInput.parentElement.style.display = 'none';
       ui.searchInput.parentElement.style.opacity = '0';
       ui.searchInput.value = ''; // Clear search
       // Trigger input event to reset list if needed, or just relying on renderPlaylist next time
