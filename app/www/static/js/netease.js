@@ -396,6 +396,7 @@ async function saveNeteaseConfig() {
       if (ui.neteaseApiSettingsInput) ui.neteaseApiSettingsInput.value = state.neteaseApiBase || 'http://localhost:23236';
       toggleNeteaseGate(!!state.neteaseApiBase);
       showToast('保存成功');
+      closeSettingsModal();
     } else {
       showToast(json.error || '保存失败');
     }
@@ -422,6 +423,7 @@ async function bindNeteaseApi() {
         showToast('连接成功');
         toggleNeteaseGate(true);
         refreshLoginStatus();
+        closeSettingsModal();
       } else {
         showToast('无法连接到该 API 地址');
       }
@@ -644,7 +646,10 @@ function bindEvents() {
     ui.neteaseDownloadPanel.classList.toggle('hidden');
   });
   ui.neteaseApiGateBtn?.addEventListener('click', bindNeteaseApi);
-  if (ui.neteaseChangeApiBtn) ui.neteaseChangeApiBtn.addEventListener('click', () => toggleNeteaseGate(false));
+  if (ui.neteaseChangeApiBtn) ui.neteaseChangeApiBtn.addEventListener('click', () => {
+    toggleNeteaseGate(false);
+    closeSettingsModal();
+  });
   ui.neteaseOpenConfigBtn?.addEventListener('click', () => {
     ui.neteaseApiGateInput.focus();
     ui.neteaseApiGateInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
