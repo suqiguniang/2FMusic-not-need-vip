@@ -16,7 +16,12 @@
                 "23237"
             ],
             "justMyCode": true,
-            "autoStartBrowser": true,
+            "rules": [
+                {
+                    "path": "${workspaceFolder}/app/server/lib",
+                    "include": false
+                }
+            ],
             "env": {
                 "FLASK_DEBUG": "1"
             }
