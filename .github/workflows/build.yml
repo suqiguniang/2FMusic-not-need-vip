@@ -171,7 +171,7 @@ jobs:
         echo "✅ Generated: $BINARY_FPK_NAME"
 
     # 8. 删除旧的同版本 Release
-    - name: Delete old pre-releases
+    - name: Delete old Pre-release
       run: |
         TAG="v${{ steps.version.outputs.version }}-pre"
         gh release delete "$TAG" --yes || true
@@ -186,33 +186,29 @@ jobs:
         tag_name: v${{ steps.version.outputs.version }}-pre
         name: 2FMusic ${{ steps.version.outputs.version }} (Dual Versions)
         body: |
-          ## 🚀 Auto-built Dual Release
+          ## 🚀 自动构建的测试版
 
-          ### ℹ️ Build Details
-          - **Version**: ${{ steps.version.outputs.version }}
-          - **Triggered by**: @${{ github.actor }}
-          - **Event**: ${{ github.event_name }}
+          ### ℹ️ 构建信息
+          - **版本**: ${{ steps.version.outputs.version }}
+          - **触发者**: @${{ github.actor }}
+          - **事件**: ${{ github.event_name }}
           
-          ### 📝 Changelog
+          ### 📝 变更日志
           ${{ steps.changelog.outputs.logs }}
 
           ---
 
-          此 Release 包含两个版本的安装包：
-
-          ### 1. 🐍 Python Source Version (`-python.fpk`)
+          ### 1. 🐍 Python 源码版
           - **文件**: `${{ steps.build_source.outputs.source_pkg }}`
-          - **依赖**: 依赖系统 Python 环境 (`python312`)。
+          - **依赖**: 依赖 Python 环境 (`python312`)。
           
-          ### 2. ⚡ Binary Version (`-amd64.fpk`)
+          ### 2. ⚡ 二进制版
           - **文件**: `${{ steps.build_binary.outputs.binary_pkg }}`
-          - **依赖**: **无需**系统 Python 环境，开箱即用。
-
-          ### ⚠️ Notes
-          - 这是一个测试版 (Pre-release)。
+          - **依赖**: **无需** Python 环境，开箱即用。
 
         files: |
           ${{ steps.build_source.outputs.source_pkg }}
           ${{ steps.build_binary.outputs.binary_pkg }}
         prerelease: true
+        make_latest: true
         draft: false
