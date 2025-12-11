@@ -29,6 +29,9 @@ try:
     import requests
     from mutagen import File
     from mutagen.easyid3 import EasyID3
+    from mutagen.id3 import ID3, APIC
+    from mutagen.flac import FLAC, Picture
+    from mutagen.mp4 import MP4, MP4Cover
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
     from werkzeug.middleware.proxy_fix import ProxyFix
@@ -375,6 +378,69 @@ def extract_embedded_cover(file_path: str, base_name: str = None):
     except Exception as e:
         logger.warning(f"提取内嵌封面失败: {file_path}, 错误: {e}")
         return False
+
+def fetch_cover_bytes(url: str):
+    if not url:
+        return None
+    try:
+        resp = requests.get(url, timeout=8, headers=COMMON_HEADERS)
+        if resp.status_code == 200 and resp.content:
+            return resp.content
+    except Exception as e:
+        logger.warning(f"封面下载失败: {url}, 错误: {e}")
+    return None
+
+def embed_cover_to_file(audio_path: str, cover_bytes: bytes):
+    """将封面嵌入音频文件（支持 mp3/flac/m4a）。"""
+    if not cover_bytes or not os.path.exists(audio_path):
+        return
+    ext = os.path.splitext(audio_path)[1].lower()
+    try:
+        if ext == '.mp3':
+            audio = None
+            try:
+                audio = ID3(audio_path)
+            except Exception:
+                audio = File(audio_path)
+                audio.add_tags()
+                audio.save()
+                audio = ID3(audio_path)
+            if audio:
+                audio.delall('APIC')
+                audio.add(APIC(mime='image/jpeg', type=3, desc='Cover', data=cover_bytes))
+                audio.save()
+        elif ext == '.flac':
+            audio = FLAC(audio_path)
+            pic = Picture()
+            pic.data = cover_bytes
+            pic.type = 3
+            pic.mime = 'image/jpeg'
+            audio.clear_pictures()
+            audio.add_picture(pic)
+            audio.save()
+        elif ext in ('.m4a', '.m4b', '.m4p'):
+            audio = MP4(audio_path)
+            fmt = MP4Cover.FORMAT_JPEG
+            if cover_bytes.startswith(b'\x89PNG'):
+                fmt = MP4Cover.FORMAT_PNG
+            audio['covr'] = [MP4Cover(cover_bytes, fmt)]
+            audio.save()
+    except Exception as e:
+        logger.warning(f"内嵌封面失败: {audio_path}, 错误: {e}")
+
+def save_cover_file(cover_bytes: bytes, base_name: str):
+    if not cover_bytes or not base_name:
+        return None
+    try:
+        cover_dir = os.path.join(MUSIC_LIBRARY_PATH, 'covers')
+        os.makedirs(cover_dir, exist_ok=True)
+        cover_path = os.path.join(cover_dir, f"{base_name}.jpg")
+        with open(cover_path, 'wb') as f:
+            f.write(cover_bytes)
+        return cover_path
+    except Exception as e:
+        logger.warning(f"封面保存失败: {base_name}, 错误: {e}")
+        return None
 
 AUDIO_EXTS = ('.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a')
 
@@ -1442,12 +1508,26 @@ def download_netease_music():
     threading.Thread(target=run_download_task, args=(task_id, payload), daemon=True).start()
     return jsonify({'success': True, 'task_id': task_id})
 
+def _normalize_cover_url(url: str):
+    if not url:
+        return None
+    u = url.replace('http://', 'https://')
+    if '//' not in u:
+        return None
+    # NetEase 图片参数：确保有清晰尺寸
+    if 'param=' not in u and '?param=' not in u:
+        sep = '&' if '?' in u else '?'
+        u = f"{u}{sep}param=1024y1024"
+    return u
+
 def run_download_task(task_id, payload):
     song_id = payload.get('id')
     title = (payload.get('title') or '').strip()
     artist = (payload.get('artist') or '').strip()
     album = (payload.get('album') or '').strip()
     level = payload.get('level') or 'exhigh'
+    cover_url = _normalize_cover_url(payload.get('cover') or payload.get('album_art'))
+    cover_bytes = fetch_cover_bytes(cover_url) if cover_url else None
     target_dir = payload.get('target_dir') or NETEASE_DOWNLOAD_DIR
     target_dir = os.path.abspath(target_dir)
     
@@ -1458,8 +1538,9 @@ def run_download_task(task_id, payload):
     try:
         os.makedirs(target_dir, exist_ok=True)
         need_detail_for_level = not payload.get('level')
-        if not title or need_detail_for_level:
-            # 拉取歌曲详情补充元信息和下载音质
+        need_detail_for_cover = cover_bytes is None
+        if not title or need_detail_for_level or need_detail_for_cover:
+            # 拉取歌曲详情补充元信息、下载音质和封面
             meta_resp = call_netease_api('/song/detail', {'ids': song_id})
             songs = meta_resp.get('songs', []) if isinstance(meta_resp, dict) else []
             if songs:
@@ -1469,6 +1550,10 @@ def run_download_task(task_id, payload):
                 title = info.get('name') or title or f"未命名 {song_id}"
                 artist = ' / '.join([a.get('name') for a in info.get('ar', []) if a.get('name')]) or artist
                 album = (info.get('al') or {}).get('name') or album
+                if need_detail_for_cover and not cover_bytes:
+                    pic_url = _normalize_cover_url((info.get('al') or {}).get('picUrl'))
+                    if pic_url:
+                        cover_bytes = fetch_cover_bytes(pic_url)
                 base_filename = sanitize_filename(f"{artist or '未知艺术家'} - {title}")
         if not title:
             title = f"未命名 {song_id}"
@@ -1525,8 +1610,12 @@ def run_download_task(task_id, payload):
             if os.path.exists(tmp_path):
                 try: os.remove(tmp_path)
                 except: pass
-
+            
         # 索引文件
+        base_name_for_cover = os.path.splitext(os.path.basename(target_path))[0]
+        if cover_bytes:
+            embed_cover_to_file(target_path, cover_bytes)
+            save_cover_file(cover_bytes, base_name_for_cover)
         index_single_file(target_path)
         
         DOWNLOAD_TASKS[task_id]['status'] = 'success'
