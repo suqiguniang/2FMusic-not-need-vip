@@ -72,7 +72,7 @@ export async function loadMountPoints() {
     ui.mountListContainer.innerHTML = '';
     if (data.success) {
       if (data.data.length === 0) {
-        ui.mountListContainer.innerHTML = '<div class="loading-text">暂无挂载目录</div>';
+        ui.mountListContainer.innerHTML = '<div class="loading-text">暂无自定义目录</div>';
       } else {
         const frag = document.createDocumentFragment();
         data.data.forEach(path => {
@@ -107,7 +107,7 @@ export async function loadMountPoints() {
 }
 
 export function triggerRemoveMount(path) {
-  showConfirmDialog('移除挂载', `确定要移除目录<br><b>${path}</b> 吗？`, () => {
+  showConfirmDialog('移除目录', `确定要移除目录<br><b>${path}</b> 吗？`, () => {
     showToast('正在移除...');
     api.mount.remove(path).then(data => {
       if (data.success) {
@@ -133,7 +133,7 @@ export function trackMountProgress(onDone) {
         clearInterval(interval);
         if (ui.uploadFill) ui.uploadFill.style.width = '100%';
         if (ui.uploadPercent) ui.uploadPercent.innerText = '100%';
-        if (ui.uploadMsg) ui.uploadMsg.innerText = '挂载并索引完成!';
+        if (ui.uploadMsg) ui.uploadMsg.innerText = '扫描并索引完成!';
         setTimeout(() => { onDone && onDone(); }, 1000);
       }
     } catch (e) { console.error('Mount poll error', e); }
@@ -146,7 +146,7 @@ export function initMounts(onRefreshSongs) {
       const path = ui.mountPathInput?.value.trim();
       if (!path) { showToast('请输入路径'); return; }
       ui.uploadModal?.classList.add('active');
-      if (ui.uploadFileName) ui.uploadFileName.innerText = '挂载目录: ' + path;
+      if (ui.uploadFileName) ui.uploadFileName.innerText = '扫描目录: ' + path;
       if (ui.uploadFill) ui.uploadFill.style.width = '0%';
       if (ui.uploadPercent) ui.uploadPercent.innerText = '0%';
       if (ui.uploadMsg) ui.uploadMsg.innerText = '正在提交...';

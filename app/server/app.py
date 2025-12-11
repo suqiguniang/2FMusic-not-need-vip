@@ -723,6 +723,17 @@ def list_mount_points():
             return jsonify({'success': True, 'data': [row['path'] for row in rows]})
     except Exception as e: return jsonify({'success': False, 'error': str(e)})
 
+def check_has_music(path):
+    """检查目录是否包含音乐文件"""
+    try:
+        for root, _, files in os.walk(path):
+            for f in files:
+                if f.lower().endswith(AUDIO_EXTS):
+                    return True
+    except Exception:
+        pass
+    return False
+
 @app.route('/api/mount_points', methods=['POST'])
 def add_mount_point():
     logger.info("API请求: 添加挂载点")
@@ -732,6 +743,10 @@ def add_mount_point():
             return jsonify({'success': False, 'error': '路径不存在'})
             
         path = os.path.abspath(path)
+
+        # 校验目录内容
+        if not check_has_music(path):
+            return jsonify({'success': False, 'error': '该目录及其子目录中未发现可识别的音乐文件'})
         
         with get_db() as conn:
             if conn.execute("SELECT 1 FROM mount_points WHERE path=?", (path,)).fetchone():
