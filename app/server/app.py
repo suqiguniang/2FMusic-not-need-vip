@@ -31,6 +31,7 @@ try:
     from mutagen.easyid3 import EasyID3
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
+    from werkzeug.middleware.proxy_fix import ProxyFix
 except ImportError as e:
     print(f"错误：无法导入依赖库。\n详情: {e}")
     sys.exit(1)
@@ -218,6 +219,7 @@ DOWNLOAD_TASKS = {} # task_id -> {status, progress, message, filename}
 
 # 修复路径问题
 app = Flask(__name__, static_folder=STATIC_DIR, template_folder=TEMPLATE_DIR)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 # 配置静态文件缓存过期时间为 1 年 (31536000 秒)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000
 
