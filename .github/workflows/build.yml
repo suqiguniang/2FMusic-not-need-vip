@@ -180,7 +180,8 @@ jobs:
         cd extensions/preview
         fnpack build
         
-        PREVIEW_FPK_NAME="2fmusic-preview-${{ steps.version.outputs.version }}.fpk"
+        PREVIEW_VERSION=$(grep "^version" manifest | awk -F'=' '{print $2}' | tr -d '[:space:]')
+        PREVIEW_FPK_NAME="2fmusic-preview-${PREVIEW_VERSION}.fpk"
         
         if [ -f "2fmusic-preview.fpk" ]; then
           mv 2fmusic-preview.fpk "../../$PREVIEW_FPK_NAME"
