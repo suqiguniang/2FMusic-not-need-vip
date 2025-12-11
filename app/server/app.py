@@ -1105,12 +1105,12 @@ def get_lyrics_api():
                 logger.warning(f"读取本地歌词失败: {lrc_path}, 错误: {e}")
     # 2. 网络获取
     api_urls = [
-        f"https://lrcapi.msfxp.top/lyrics?artist={quote(artist or '')}&title={quote(title)}",
-        f"https://api.lrc.cx/lyrics?artist={quote(artist or '')}&title={quote(title)}"
+        f"https://api.lrc.cx/lyrics?artist={quote(artist or '')}&title={quote(title)}",
+        f"https://lrcapi.msfxp.top/lyrics?artist={quote(artist or '')}&title={quote(title)}"
     ]
     for api_url in api_urls:
         try:
-            logger.info(f"请求歌词API: {api_url}")
+            logger.info(f"请求网络歌词API: {api_url}")
             resp = requests.get(api_url, timeout=3, headers=COMMON_HEADERS)
             if resp.status_code == 200:
                 with open(lrc_path, 'wb') as f:
@@ -1119,8 +1119,8 @@ def get_lyrics_api():
                 return jsonify({'success': True, 'lyrics': resp.text})
             else:
                 logger.warning(f"歌词API响应异常: {api_url}, 状态码: {resp.status_code}")
-        except Exception as e:
-            logger.warning(f"歌词API请求失败: {api_url}, 错误: {e}")
+        except:
+            pass
     logger.warning(f"歌词获取失败: {title} - {artist}")
     return jsonify({'success': False})
 
@@ -1169,6 +1169,7 @@ def get_album_art_api():
     
     for api_url in api_urls:
         try:
+            logger.info(f"请求网络封面API: {api_url}")
             resp = requests.get(api_url, timeout=3, headers=COMMON_HEADERS)
             if resp.status_code == 200 and resp.headers.get('content-type', '').startswith('image/'):
                 with open(local_path, 'wb') as f: 
@@ -1181,8 +1182,11 @@ def get_album_art_api():
                         conn.commit()
                         
                 return jsonify({'success': True, 'album_art': f"/api/music/covers/{quote(base_name)}.jpg?filename={quote(base_name)}"})
-        except: pass
-        
+            else:
+                logger.warning(f"封面API响应异常: {api_url}, 状态码: {resp.status_code}")
+        except:
+            pass
+    logger.warning(f"封面获取失败: {title} - {artist}")
     return jsonify({'success': False})
 
 @app.route('/api/music/delete/<song_id>', methods=['DELETE'])
