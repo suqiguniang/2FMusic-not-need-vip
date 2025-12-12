@@ -1413,6 +1413,53 @@ def delete_file(song_id):
     except Exception as e: 
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/music/clear_metadata/<song_id>', methods=['POST'])
+def clear_metadata(song_id):
+    """清除指定歌曲的元数据（封面/歌词文件），以便重新匹配。"""
+    try:
+        # 1. 查询路径
+        target_path = None
+        with get_db() as conn:
+            row = conn.execute("SELECT path FROM songs WHERE id=?", (song_id,)).fetchone()
+            if row: target_path = row['path']
+        
+        if not target_path or not os.path.exists(target_path):
+            return jsonify({'success': False, 'error': '文件未找到'})
+
+        # 2. 清理关联资源 (封面/歌词)
+        base = os.path.splitext(target_path)[0]
+        deleted_count = 0
+        for ext in ['.lrc', '.jpg']:
+            try:
+                # 同级目录
+                if os.path.exists(base + ext): 
+                    os.remove(base + ext)
+                    deleted_count += 1
+            except: pass
+            
+        # 尝试清理主库下的 covers/lyrics
+        filename = os.path.basename(target_path)
+        base_name = os.path.splitext(filename)[0]
+        for sub in ['lyrics', 'covers']:
+            ext = '.lrc' if sub == 'lyrics' else '.jpg'
+            sub_path = os.path.join(MUSIC_LIBRARY_PATH, sub, base_name + ext)
+            try: 
+                if os.path.exists(sub_path): 
+                    os.remove(sub_path)
+                    deleted_count += 1
+            except: pass
+
+        # 3. 数据库重置标识
+        with get_db() as conn:
+            conn.execute("UPDATE songs SET has_cover=0 WHERE id=?", (song_id,))
+            conn.commit()
+            
+        logger.info(f"歌曲元数据已清除: {filename}, 删除文件数: {deleted_count}")
+        return jsonify({'success': True})
+    except Exception as e: 
+        logger.warning(f"元数据清除失败: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
 # --- 辅助接口 ---
 @app.route('/api/music/covers/<cover_name>')
 def get_cover(cover_name):

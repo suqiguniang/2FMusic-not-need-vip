@@ -593,7 +593,7 @@ function parseAndRenderLyrics(lrc) {
     if (firstLine) {
       document.querySelectorAll('.lyric-line.active').forEach(l => l.classList.remove('active'));
       firstLine.classList.add('active');
-      firstLine.scrollIntoView({ behavior: 'auto', block: 'center' });
+      ui.lyricsContainer.scrollTop = 0;
     }
   }
 }
@@ -788,6 +788,44 @@ export function bindUiControls() {
       const currentSong = state.playQueue[state.currentTrackIndex];
       if (currentSong) {
         showConfirmDialog('危险操作', `确定要永久删除这首歌吗？<br><span style="font-size:0.9rem; opacity:0.7">${currentSong.title}</span>`, () => performDelete(currentSong.id));
+      }
+    });
+  }
+
+  // Rematch Metadata Logic
+  const btnRematch = document.getElementById('action-rematch');
+  if (btnRematch) {
+    btnRematch.addEventListener('click', async () => {
+      ui.actionMenuOverlay?.classList.remove('active');
+      const currentSong = state.playQueue[state.currentTrackIndex];
+      if (!currentSong) return;
+      if (currentSong.isExternal) { showToast('外部文件暂不支持匹配'); return; }
+
+      showToast('正在清除旧元数据...', 'loading');
+      try {
+        const res = await api.library.clearMetadata(currentSong.id);
+        hideProgressToast(); // clear loading toast
+        if (res.success) {
+          showToast('已重置，正在重新搜索...');
+          // 1. Reset Local Cache
+          currentSong.cover = "/static/images/ICON_256.PNG";
+          delete currentSong.lyrics;
+
+          // 2. Reset UI
+          ['current-cover', 'fp-cover'].forEach(id => { const el = document.getElementById(id); if (el) el.src = currentSong.cover; });
+          if (ui.lyricsContainer) ui.lyricsContainer.innerHTML = '';
+          renderNoLyrics('正在重新匹配...');
+
+          // 3. Force Re-fetch
+          playTrack(state.currentTrackIndex, false);
+
+        } else {
+          showToast('操作失败: ' + (res.data?.error || '未知错误'));
+        }
+      } catch (err) {
+        hideProgressToast();
+        showToast('网络请求失败');
+        console.error(err);
       }
     });
   }

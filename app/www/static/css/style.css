@@ -834,7 +834,7 @@ input[type=range]::-webkit-slider-thumb {
     text-align: center;
     mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
     -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
-    padding: 30vh 0 4rem;
+    padding: 2rem 0 4rem;
     box-sizing: border-box;
     scrollbar-width: none;
 }
@@ -1786,7 +1786,7 @@ select:focus {
         min-height: 0;
         /* 关键：允许 flex 容器缩小以显示滚动条 */
         mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
-        padding: 20vh 0 3rem;
+        padding: 4rem 0 3rem;
         margin-bottom: 0.5rem;
     }
 

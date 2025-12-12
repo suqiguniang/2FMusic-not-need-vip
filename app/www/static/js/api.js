@@ -27,6 +27,10 @@ export const api = {
       const res = await fetch(`/api/music/external/meta?path=${encodeURIComponent(path)}`);
       return jsonOrThrow(res);
     },
+    async clearMetadata(id) {
+      const res = await fetch(`/api/music/clear_metadata/${id}`, { method: 'POST' });
+      return jsonOrThrow(res);
+    },
     async lyrics(query) {
       const res = await fetch(`/api/music/lyrics${query}`);
       return jsonOrThrow(res);

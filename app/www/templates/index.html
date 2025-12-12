@@ -383,13 +383,16 @@
 
         <div id="action-menu-overlay" class="custom-overlay">
             <div class="action-sheet glass-panel">
-                <div class="action-header">更多操作</div>
+                <button class="action-item" id="action-rematch">
+                    <i class="fas fa-sync-alt"></i> 刷新数据
+                </button>
                 <button class="action-item" id="action-download">
                     <i class="fas fa-download"></i> 本地下载
                 </button>
                 <button class="action-item delete" id="action-delete">
                     <i class="fas fa-trash-alt"></i> 永久删除
                 </button>
+                <div style="height: 1px; background: rgba(255,255,255,0.1); margin: 0.5rem 0;"></div>
                 <button class="action-item cancel" id="action-cancel">取消</button>
             </div>
         </div>
