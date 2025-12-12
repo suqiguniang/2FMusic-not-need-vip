@@ -595,8 +595,11 @@ async function loadNeteaseConfig() {
       if (json.api_base) apiBase = json.api_base;
       state.neteaseDownloadDir = json.download_dir || '';
       state.neteaseMaxConcurrent = 20;
+      state.neteaseQuality = json.quality || 'exhigh'; // Load quality
+
       if (ui.neteaseDownloadDirInput) ui.neteaseDownloadDirInput.value = state.neteaseDownloadDir;
       if (ui.neteaseApiSettingsInput) ui.neteaseApiSettingsInput.value = apiBase;
+      if (ui.neteaseQualitySelect) ui.neteaseQualitySelect.value = state.neteaseQuality; // Set UI
     }
   } catch (err) {
     console.warn('Config load failed, utilizing default:', err);
@@ -632,19 +635,25 @@ async function saveNeteaseConfig() {
   const apiBaseVal = ui.neteaseApiSettingsInput
     ? ui.neteaseApiSettingsInput.value.trim()
     : (ui.neteaseApiGateInput ? ui.neteaseApiGateInput.value.trim() : state.neteaseApiBase);
+  const quality = ui.neteaseQualitySelect ? ui.neteaseQualitySelect.value : 'exhigh';
 
   const payload = {};
   if (dir || state.neteaseDownloadDir) payload.download_dir = dir || state.neteaseDownloadDir;
   if (apiBaseVal) payload.api_base = apiBaseVal;
-  if (!payload.download_dir && !payload.api_base) { showToast('请输入下载目录或API地址'); return; }
+  if (quality) payload.quality = quality;
+
+  if (!payload.download_dir && !payload.api_base && !payload.quality) { showToast('未修改任何配置'); return; }
   try {
     const json = await api.netease.configSave(payload);
     if (json.success) {
       state.neteaseDownloadDir = json.download_dir;
       state.neteaseApiBase = json.api_base || '';
       state.neteaseMaxConcurrent = 20;
+      state.neteaseQuality = json.quality;
+
       if (ui.neteaseApiGateInput) ui.neteaseApiGateInput.value = state.neteaseApiBase || 'http://localhost:23236';
       if (ui.neteaseApiSettingsInput) ui.neteaseApiSettingsInput.value = state.neteaseApiBase || 'http://localhost:23236';
+
       processDownloadQueue();
       toggleNeteaseGate(!!state.neteaseApiBase);
       showToast('保存成功');
@@ -709,26 +718,26 @@ function renderLoginSuccessUI(user) {
   // Update Header User Display
   toggleLoginUI(true);
 
-    if (ui.neteaseUserDisplay) {
-      if (ui.neteaseUserName) ui.neteaseUserName.innerText = user.nickname || '用户';
-      if (ui.neteaseUserAvatar) ui.neteaseUserAvatar.src = user.avatar || '';
-      if (ui.neteaseUserTag) {
-        if (user.isVip) {
-          ui.neteaseUserTag.innerText = 'VIP';
-          ui.neteaseUserTag.classList.remove('hidden');
-        } else {
-          ui.neteaseUserTag.innerText = '普通';
-          ui.neteaseUserTag.classList.remove('hidden');
-        }
-      }
-      if (ui.neteaseAvatarWrapper) {
-        if (user.isVip) ui.neteaseAvatarWrapper.classList.add('vip-avatar-ring');
-        else ui.neteaseAvatarWrapper.classList.remove('vip-avatar-ring');
-      }
-      if (ui.neteaseVipBadge) {
-        ui.neteaseVipBadge.classList.toggle('hidden', !user.isVip);
+  if (ui.neteaseUserDisplay) {
+    if (ui.neteaseUserName) ui.neteaseUserName.innerText = user.nickname || '用户';
+    if (ui.neteaseUserAvatar) ui.neteaseUserAvatar.src = user.avatar || '';
+    if (ui.neteaseUserTag) {
+      if (user.isVip) {
+        ui.neteaseUserTag.innerText = 'VIP';
+        ui.neteaseUserTag.classList.remove('hidden');
+      } else {
+        ui.neteaseUserTag.innerText = '普通';
+        ui.neteaseUserTag.classList.remove('hidden');
       }
     }
+    if (ui.neteaseAvatarWrapper) {
+      if (user.isVip) ui.neteaseAvatarWrapper.classList.add('vip-avatar-ring');
+      else ui.neteaseAvatarWrapper.classList.remove('vip-avatar-ring');
+    }
+    if (ui.neteaseVipBadge) {
+      ui.neteaseVipBadge.classList.toggle('hidden', !user.isVip);
+    }
+  }
 
   // Close QR Modal if open
   if (ui.neteaseQrImg) ui.neteaseQrImg.src = '';
@@ -938,10 +947,10 @@ function bindEvents() {
   });
 
   // User menu
-    ui.neteaseUserDisplay?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleUserMenu();
-    });
+  ui.neteaseUserDisplay?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleUserMenu();
+  });
   ui.neteaseMenuLogout?.addEventListener('click', async (e) => {
     e.stopPropagation();
     toggleUserMenu(false);

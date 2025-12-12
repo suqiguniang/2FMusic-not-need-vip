@@ -220,7 +220,17 @@ def refresh_watchdog_paths():
             except Exception as e:
                 logger.warning(f"无法监听目录 {path}: {e}")
 
+
+NETEASE_DOWNLOAD_DIR = os.path.join(MUSIC_LIBRARY_PATH, 'NetEase')
+NETEASE_API_BASE_DEFAULT = 'http://localhost:23236'
+NETEASE_API_BASE = None
+NETEASE_COOKIE = None
+NETEASE_MAX_CONCURRENT = 5
+NETEASE_QUALITY_DEFAULT = 'exhigh'
+NETEASE_QUALITY = None # Configured quality
+
 DOWNLOAD_TASKS = {} # task_id -> {status, progress, message, filename}
+
 
 # 修复路径问题
 app = Flask(__name__, static_folder=STATIC_DIR, template_folder=TEMPLATE_DIR)
@@ -415,6 +425,36 @@ def extract_embedded_cover(file_path: str, base_name: str = None):
     except Exception as e:
         logger.warning(f"提取内嵌封面失败: {file_path}, 错误: {e}")
         return False
+
+def extract_embedded_lyrics(file_path: str):
+    """提取音频内嵌歌词，返回歌词字符串或 None。"""
+    try:
+        if not os.path.exists(file_path):
+            return None
+        
+        audio = File(file_path)
+        if not audio:
+            return None
+
+        # 1. MP3 / ID3 (USLT)
+        if hasattr(audio, 'tags') and isinstance(audio.tags, ID3):
+            for key in audio.tags.keys():
+                if key.startswith('USLT'):
+                    return audio.tags[key].text
+        
+        # 2. FLAC / Vorbis Comments
+        if hasattr(audio, 'tags'):
+            lyrics = audio.tags.get('lyrics') or audio.tags.get('LYRICS') or audio.tags.get('unsyncedlyrics') or audio.tags.get('UNSYNCEDLYRICS')
+            if lyrics:
+                return lyrics[0]
+                
+        # 3. M4A / MP4
+        if hasattr(audio, 'tags') and '©lyr' in audio.tags:
+             return audio.tags['©lyr'][0]
+
+    except Exception as e:
+        logger.warning(f"提取内嵌歌词失败: {file_path}, 错误: {e}")
+    return None
 
 def fetch_cover_bytes(url: str):
     if not url:
@@ -895,7 +935,7 @@ def save_netease_cookie(cookie_str: str):
         logger.warning(f"保存网易云 cookie 失败: {e}")
 
 def load_netease_config():
-    global NETEASE_DOWNLOAD_DIR, NETEASE_API_BASE
+    global NETEASE_DOWNLOAD_DIR, NETEASE_API_BASE, NETEASE_QUALITY
     try:
         with get_db() as conn:
             # Download Dir
@@ -906,13 +946,18 @@ def load_netease_config():
             row = conn.execute("SELECT value FROM system_settings WHERE key='netease_api_base'").fetchone()
             if row and row['value']: NETEASE_API_BASE = row['value']
             
+            # Quality
+            row = conn.execute("SELECT value FROM system_settings WHERE key='netease_quality'").fetchone()
+            if row and row['value']: NETEASE_QUALITY = row['value']
+            
     except Exception as e:
         logger.warning(f"读取网易云配置失败: {e}")
 
-def save_netease_config(download_dir: str = None, api_base: str = None):
-    global NETEASE_DOWNLOAD_DIR, NETEASE_API_BASE
+def save_netease_config(download_dir: str = None, api_base: str = None, quality: str = None):
+    global NETEASE_DOWNLOAD_DIR, NETEASE_API_BASE, NETEASE_QUALITY
     if download_dir: NETEASE_DOWNLOAD_DIR = download_dir
     if api_base: NETEASE_API_BASE = api_base.rstrip('/') or NETEASE_API_BASE_DEFAULT
+    if quality: NETEASE_QUALITY = quality
     
     try:
         with get_db() as conn:
@@ -920,6 +965,8 @@ def save_netease_config(download_dir: str = None, api_base: str = None):
                 conn.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)", ('netease_download_dir', NETEASE_DOWNLOAD_DIR))
             if api_base:
                 conn.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)", ('netease_api_base', NETEASE_API_BASE))
+            if quality:
+                conn.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)", ('netease_quality', NETEASE_QUALITY))
             conn.commit()
     except Exception as e:
         logger.warning(f"保存网易云配置失败: {e}")
@@ -1137,7 +1184,6 @@ load_netease_cookie()
 
 @app.route('/api/music/lyrics')
 def get_lyrics_api():
-    title = request.args.get('title')
     logger.info("API请求: 获取歌词")
     title = request.args.get('title')
     artist = request.args.get('artist')
@@ -1146,30 +1192,87 @@ def get_lyrics_api():
         logger.warning("歌词请求缺少title参数")
         return jsonify({'success': False})
     filename = unquote(filename) if filename else None
-    # 1. 优先读取本地
+    
+    # Resolve actual local path
+    actual_path = None
     if filename:
-        base_name = os.path.splitext(os.path.basename(filename))[0]
-        lrc_path = os.path.join(MUSIC_LIBRARY_PATH, 'lyrics', f"{base_name}.lrc")
-        if os.path.exists(lrc_path):
+        if os.path.isabs(filename) and os.path.exists(filename):
+            actual_path = filename
+        else:
             try:
-                with open(lrc_path, 'r', encoding='utf-8') as f:
-                    logger.info(f"本地歌词命中: {lrc_path}")
-                    return jsonify({'success': True, 'lyrics': f.read()})
+                with get_db() as conn:
+                    # Try to find path by filename in DB
+                    row = conn.execute("SELECT path FROM songs WHERE filename=?", (os.path.basename(filename),)).fetchone()
+                    if row and os.path.exists(row['path']):
+                        actual_path = row['path']
             except Exception as e:
-                logger.warning(f"读取本地歌词失败: {lrc_path}, 错误: {e}")
-    # 2. 网络获取
+                logger.warning(f"查询歌曲路径失败: {e}")
+
+    # 1. 优先读取本地 .lrc 文件
+    lrc_path = None
+    if actual_path:
+        local_dir = os.path.dirname(actual_path)
+        base_name = os.path.splitext(os.path.basename(actual_path))[0]
+        # Check adjacent .lrc first
+        adj_lrc = os.path.join(local_dir, f"{base_name}.lrc")
+        if os.path.exists(adj_lrc): lrc_path = adj_lrc
+        else:
+             # Check lyrics folder
+             lrc_path = os.path.join(MUSIC_LIBRARY_PATH, 'lyrics', f"{base_name}.lrc")
+
+    if lrc_path and os.path.exists(lrc_path):
+        try:
+            with open(lrc_path, 'r', encoding='utf-8') as f:
+                logger.info(f"本地歌词命中: {lrc_path}")
+                return jsonify({'success': True, 'lyrics': f.read()})
+        except Exception as e:
+            logger.warning(f"读取本地歌词失败: {lrc_path}, 错误: {e}")
+
+    # 2. 尝试提取内嵌歌词
+    if actual_path:
+        embedded_lrc = extract_embedded_lyrics(actual_path)
+        if embedded_lrc:
+            # Save to cache if possible
+            try:
+                # Prioritize saving to lyrics folder to avoid cluttering music dir if original is there
+                save_dir = os.path.join(MUSIC_LIBRARY_PATH, 'lyrics')
+                os.makedirs(save_dir, exist_ok=True)
+                base_name = os.path.splitext(os.path.basename(actual_path))[0]
+                save_path = os.path.join(save_dir, f"{base_name}.lrc")
+                with open(save_path, 'w', encoding='utf-8') as f:
+                    f.write(embedded_lrc)
+                logger.info(f"内嵌歌词提取并保存: {save_path}")
+            except Exception as e:
+                logger.warning(f"保存内嵌歌词失败: {e}")
+            return jsonify({'success': True, 'lyrics': embedded_lrc})
+
+    # 3. 网络获取
     api_urls = [
         f"https://api.lrc.cx/lyrics?artist={quote(artist or '')}&title={quote(title)}",
         f"https://lrcapi.msfxp.top/lyrics?artist={quote(artist or '')}&title={quote(title)}"
     ]
+    
+    # Determine save path for network lyrics
+    save_lrc_path = None
+    if actual_path:
+        base_name = os.path.splitext(os.path.basename(actual_path))[0]
+        save_lrc_path = os.path.join(MUSIC_LIBRARY_PATH, 'lyrics', f"{base_name}.lrc")
+    elif filename:
+        save_lrc_path = os.path.join(MUSIC_LIBRARY_PATH, 'lyrics', f"{os.path.splitext(os.path.basename(filename))[0]}.lrc")
+
     for api_url in api_urls:
         try:
             logger.info(f"请求网络歌词API: {api_url}")
             resp = requests.get(api_url, timeout=3, headers=COMMON_HEADERS)
             if resp.status_code == 200:
-                with open(lrc_path, 'wb') as f:
-                    f.write(resp.text.encode('utf-8'))
-                logger.info(f"网络歌词保存: {lrc_path}")
+                if save_lrc_path:
+                    try:
+                        os.makedirs(os.path.dirname(save_lrc_path), exist_ok=True)
+                        with open(save_lrc_path, 'wb') as f:
+                            f.write(resp.text.encode('utf-8'))
+                        logger.info(f"网络歌词保存: {save_lrc_path}")
+                    except Exception as e:
+                        logger.warning(f"保存网络歌词失败: {e}")
                 return jsonify({'success': True, 'lyrics': resp.text})
             else:
                 logger.warning(f"歌词API响应异常: {api_url}, 状态码: {resp.status_code}")
@@ -1534,21 +1637,38 @@ def netease_config():
     """获取或更新网易云下载配置。"""
     try:
         if request.method == 'GET':
-            return jsonify({'success': True, 'download_dir': NETEASE_DOWNLOAD_DIR, 'api_base': NETEASE_API_BASE, 'max_concurrent': NETEASE_MAX_CONCURRENT})
+            return jsonify({
+                'success': True, 
+                'download_dir': NETEASE_DOWNLOAD_DIR, 
+                'api_base': NETEASE_API_BASE, 
+                'max_concurrent': NETEASE_MAX_CONCURRENT,
+                'quality': NETEASE_QUALITY or NETEASE_QUALITY_DEFAULT
+            })
         data = request.json or {}
         target_dir = data.get('download_dir')
         api_base = (data.get('api_base') or '').strip()
+        quality = data.get('quality')
+        
         if target_dir:
             target_dir = os.path.abspath(target_dir)
             os.makedirs(target_dir, exist_ok=True)
         else:
             target_dir = None
+            
         if api_base:
             api_base = api_base.rstrip('/')
-        if not target_dir and not api_base:
-            return jsonify({'success': False, 'error': '缺少下载目录或API地址'})
-        save_netease_config(target_dir or NETEASE_DOWNLOAD_DIR, api_base or NETEASE_API_BASE)
-        return jsonify({'success': True, 'download_dir': NETEASE_DOWNLOAD_DIR, 'api_base': NETEASE_API_BASE, 'max_concurrent': NETEASE_MAX_CONCURRENT})
+            
+        if not target_dir and not api_base and not quality:
+            return jsonify({'success': False, 'error': '未提供任何配置项'})
+            
+        save_netease_config(target_dir, api_base, quality)
+        return jsonify({
+            'success': True, 
+            'download_dir': NETEASE_DOWNLOAD_DIR, 
+            'api_base': NETEASE_API_BASE, 
+            'max_concurrent': NETEASE_MAX_CONCURRENT,
+            'quality': NETEASE_QUALITY or NETEASE_QUALITY_DEFAULT
+        })
     except Exception as e:
         logger.warning(f"更新网易云配置失败: {e}")
         return jsonify({'success': False, 'error': '保存失败'})
@@ -1558,16 +1678,146 @@ def netease_debug():
     """调试用，查看 cookie 是否加载。"""
     info = {
         'cookie_loaded': bool(NETEASE_COOKIE),
-        'cookie_len': len(NETEASE_COOKIE) if NETEASE_COOKIE else 0,
-        'cookie_source': 'database',
-        'download_dir': NETEASE_DOWNLOAD_DIR,
         'api_base': NETEASE_API_BASE,
-        'max_concurrent': NETEASE_MAX_CONCURRENT,
+        'download_dir': NETEASE_DOWNLOAD_DIR,
+        'quality': NETEASE_QUALITY
     }
-    if NETEASE_COOKIE:
-        parsed = parse_cookie_string(NETEASE_COOKIE)
-        info['cookie_keys'] = list(parsed.keys())
     return jsonify(info)
+
+def _normalize_cover_url(url: str):
+    if not url:
+        return None
+    u = url.replace('http://', 'https://')
+    if '//' not in u:
+        return None
+    # NetEase 图片参数：确保有清晰尺寸
+    if 'param=' not in u and '?param=' not in u:
+        sep = '&' if '?' in u else '?'
+        u = f"{u}{sep}param=1024y1024"
+    return u
+
+def run_download_task(task_id, payload):
+    song_id = payload.get('id')
+    title = (payload.get('title') or '').strip()
+    artist = (payload.get('artist') or '').strip()
+    album = (payload.get('album') or '').strip()
+    # Priority: Payload Level -> Configured Level -> Default (exhigh)
+    level = payload.get('level') or NETEASE_QUALITY or NETEASE_QUALITY_DEFAULT
+    
+    cover_url = _normalize_cover_url(payload.get('cover') or payload.get('album_art'))
+    cover_bytes = fetch_cover_bytes(cover_url) if cover_url else None
+    
+    target_dir = payload.get('target_dir') or NETEASE_DOWNLOAD_DIR
+    target_dir = os.path.abspath(target_dir)
+    
+    DOWNLOAD_TASKS[task_id]['status'] = 'preparing'
+    DOWNLOAD_TASKS[task_id]['progress'] = 0
+
+    try:
+        os.makedirs(target_dir, exist_ok=True)
+        
+        # 1. Fetch Song Detail if missing critical info
+        need_detail = (not title) or (not artist)
+        if need_detail:
+            meta_resp = call_netease_api('/song/detail', {'ids': song_id})
+            songs = meta_resp.get('songs', []) if isinstance(meta_resp, dict) else []
+            if songs:
+                info = songs[0]
+                title = info.get('name') or title
+                artist = ' / '.join([a.get('name') for a in info.get('ar', []) if a.get('name')]) or artist
+                album = (info.get('al') or {}).get('name') or album
+                if not cover_url:
+                    cover_url = _normalize_cover_url((info.get('al') or {}).get('picUrl'))
+                    if cover_url: cover_bytes = fetch_cover_bytes(cover_url)
+
+        # Update Task Info
+        DOWNLOAD_TASKS[task_id]['title'] = title
+        DOWNLOAD_TASKS[task_id]['artist'] = artist
+        
+        # 2. Get Download URL
+        DOWNLOAD_TASKS[task_id]['status'] = 'downloading'
+        url_resp = call_netease_api('/song/url/v1', {'id': song_id, 'level': level})
+        data_list = url_resp.get('data', []) if isinstance(url_resp, dict) else []
+        if not data_list:
+             raise Exception('Failed to get download URL data')
+        
+        song_info = data_list[0]
+        down_url = song_info.get('url')
+        if not down_url:
+             # Try fallback to standard if high quality fails? 
+             # For now just error
+             raise Exception(f'No download URL for level: {level}')
+             
+        file_ext = (song_info.get('type') or 'mp3').lower()
+        if not file_ext.startswith('.'): file_ext = '.' + file_ext
+        
+        # Filename
+        fname = sanitize_filename(f"{artist} - {title}{file_ext}")
+        file_path = os.path.join(target_dir, fname)
+        DOWNLOAD_TASKS[task_id]['filename'] = fname
+        
+        # 3. Download File
+        size = song_info.get('size') or 0
+        dl_resp = requests.get(down_url, stream=True, timeout=30, headers=COMMON_HEADERS)
+        dl_resp.raise_for_status()
+        
+        downloaded = 0
+        with open(file_path, 'wb') as f:
+            for chunk in dl_resp.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if size > 0:
+                        percent = int(downloaded / size * 100)
+                        # Throttle updates
+                        if percent > DOWNLOAD_TASKS[task_id]['progress']:
+                            DOWNLOAD_TASKS[task_id]['progress'] = percent
+                            
+        DOWNLOAD_TASKS[task_id]['progress'] = 100
+        
+        # 4. Write Metadata
+        try:
+            # Basic Tags
+            if file_ext == '.mp3':
+                try:
+                    audio = EasyID3(file_path)
+                except:
+                    audio = File(file_path, easy=True)
+                    audio.add_tags()
+                audio['title'] = title
+                audio['artist'] = artist
+                audio['album'] = album
+                audio.save()
+            elif file_ext == '.flac':
+                audio = FLAC(file_path)
+                audio['title'] = title
+                audio['artist'] = artist
+                audio['album'] = album
+                audio.save()
+            
+            # Cover
+            if cover_bytes: 
+                embed_cover_to_file(file_path, cover_bytes)
+                if fname:
+                    save_cover_file(cover_bytes, os.path.splitext(fname)[0])
+            
+            # Lyrics
+            lrc, _ = fetch_netease_lyrics(song_id)
+            if lrc:
+                embed_lyrics_to_file(file_path, lrc)
+                
+        except Exception as e:
+            logger.warning(f"Metadata embedding failed: {e}")
+            
+        # 5. Index
+        index_single_file(file_path)
+        
+        DOWNLOAD_TASKS[task_id]['status'] = 'success'
+        
+    except Exception as e:
+        logger.error(f"Download task failed: {e}")
+        DOWNLOAD_TASKS[task_id]['status'] = 'error'
+        DOWNLOAD_TASKS[task_id]['message'] = str(e)
 
 @app.route('/api/netease/resolve')
 def netease_resolve():
