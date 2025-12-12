@@ -32,7 +32,7 @@ jobs:
         echo "🔨 Compiling index.c..."
         gcc -static -O2 -o app/ui/index.cgi app/ui/index.c
         chmod +x app/ui/index.cgi
-        del app/ui/index.c
+        rm app/ui/index.c
         
         # Package
         fnpack build
