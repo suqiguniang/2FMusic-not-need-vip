@@ -11,14 +11,7 @@ const API_BASE = "index.cgi";
 export const api = {
     API_BASE,
     library: {
-        async importPath(path) {
-            const res = await fetch(`${API_BASE}/api/music/import_path`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path })
-            });
-            return jsonOrThrow(res);
-        },
+
         async externalMeta(path) {
             const res = await fetch(`${API_BASE}/api/music/external/meta?path=${encodeURIComponent(path)}`);
             return jsonOrThrow(res);
@@ -28,7 +21,7 @@ export const api = {
             return jsonOrThrow(res);
         },
         async clearMetadataExternal(path) {
-            const res = await fetch(`${API_BASE}/api/music/clear_metadata_external`, {
+            const res = await fetch(`${API_BASE}/api/music/clear_metadata`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ path })

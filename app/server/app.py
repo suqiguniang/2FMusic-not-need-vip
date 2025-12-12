@@ -1423,33 +1423,48 @@ def delete_file(song_id):
     except Exception as e: 
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/music/clear_metadata', methods=['POST'])
 @app.route('/api/music/clear_metadata/<song_id>', methods=['POST'])
-def clear_metadata(song_id):
-    """清除指定歌曲的元数据（封面/歌词文件），以便重新匹配。"""
+def clear_metadata(song_id=None):
+    """清除元数据（封面/歌词）。
+    支持两种模式：
+    1. URL带 song_id: 库内文件，清理并更新数据库。
+    2. JSON带 path: 外部文件，仅通过路径清理缓存。
+    统一只清理主音乐库 covers/lyrics 目录下的文件。
+    """
     try:
-        # 1. 查询路径
         target_path = None
-        with get_db() as conn:
-            row = conn.execute("SELECT path FROM songs WHERE id=?", (song_id,)).fetchone()
-            if row: target_path = row['path']
         
-        if not target_path or not os.path.exists(target_path):
-            return jsonify({'success': False, 'error': '文件未找到'})
+        # 模式1: ID模式
+        if song_id:
+            with get_db() as conn:
+                row = conn.execute("SELECT path FROM songs WHERE id=?", (song_id,)).fetchone()
+                if row: target_path = row['path']
+        # 模式2: Path模式
+        else:
+            data = request.get_json() or {}
+            target_path = data.get('path')
 
-        # 2. 清理关联资源 (封面/歌词)
-        base = os.path.splitext(target_path)[0]
-        deleted_count = 0
-        for ext in ['.lrc', '.jpg']:
-            try:
-                # 同级目录
-                if os.path.exists(base + ext): 
-                    os.remove(base + ext)
-                    deleted_count += 1
-            except: pass
-            
-        # 尝试清理主库下的 covers/lyrics
+        if not target_path:
+            return jsonify({'success': False, 'error': '未找到对应文件路径'})
+
+        # 安全检查：确保路径在允许的范围内
+        target_path = os.path.abspath(target_path)
+        allowed_roots = [os.path.abspath(MUSIC_LIBRARY_PATH)]
+        try:
+            with get_db() as conn:
+                rows = conn.execute("SELECT path FROM mount_points").fetchall()
+                allowed_roots.extend([os.path.abspath(r['path']) for r in rows])
+        except Exception: pass
+        
+        if not any(target_path.startswith(root) for root in allowed_roots):
+            return jsonify({'success': False, 'error': '非法路径：仅允许操作音乐库内的文件'})
+
+        # 核心逻辑：清理主库下的 centralized covers/lyrics
         filename = os.path.basename(target_path)
         base_name = os.path.splitext(filename)[0]
+        deleted_count = 0
+        
         for sub in ['lyrics', 'covers']:
             ext = '.lrc' if sub == 'lyrics' else '.jpg'
             sub_path = os.path.join(MUSIC_LIBRARY_PATH, sub, base_name + ext)
@@ -1459,12 +1474,13 @@ def clear_metadata(song_id):
                     deleted_count += 1
             except: pass
 
-        # 3. 数据库重置标识
-        with get_db() as conn:
-            conn.execute("UPDATE songs SET has_cover=0 WHERE id=?", (song_id,))
-            conn.commit()
+        # 如果是库内文件（有song_id），还需要重置数据库状态
+        if song_id:
+            with get_db() as conn:
+                conn.execute("UPDATE songs SET has_cover=0 WHERE id=?", (song_id,))
+                conn.commit()
             
-        logger.info(f"歌曲元数据已清除: {filename}, 删除文件数: {deleted_count}")
+        logger.info(f"元数据已清除: {filename}, ID: {song_id}, 删除数: {deleted_count}")
         return jsonify({'success': True})
     except Exception as e: 
         logger.warning(f"元数据清除失败: {e}")
@@ -1520,49 +1536,6 @@ def import_single_file():
 
     except Exception as e:
         logger.error(f"导入失败: {e}")
-        return jsonify({'success': False, 'error': str(e)})
-
-@app.route('/api/music/clear_metadata_external', methods=['POST'])
-def clear_metadata_external():
-    """清除外部文件的元数据（通过路径）
-    注意：仅清理保存在主音乐库 covers/lyrics 目录下的缓存文件。
-    """
-    try:
-        data = request.get_json()
-        target_path = data.get('path')
-        if not target_path:
-            return jsonify({'success': False, 'error': '未提供路径'})
-
-        # 仅允许操作白名单路径（可选，但保留更安全）
-        target_path = os.path.abspath(target_path)
-        allowed_roots = [os.path.abspath(MUSIC_LIBRARY_PATH)]
-        try:
-            with get_db() as conn:
-                rows = conn.execute("SELECT path FROM mount_points").fetchall()
-                allowed_roots.extend([os.path.abspath(r['path']) for r in rows])
-        except Exception: pass
-        
-        if not any(target_path.startswith(root) for root in allowed_roots):
-            return jsonify({'success': False, 'error': '非法路径'})
-
-        # 核心逻辑：仅清理主库下的 centralized covers/lyrics
-        filename = os.path.basename(target_path)
-        base_name = os.path.splitext(filename)[0]
-        deleted_count = 0
-        
-        for sub in ['lyrics', 'covers']:
-            ext = '.lrc' if sub == 'lyrics' else '.jpg'
-            sub_path = os.path.join(MUSIC_LIBRARY_PATH, sub, base_name + ext)
-            try: 
-                if os.path.exists(sub_path): 
-                    os.remove(sub_path)
-                    deleted_count += 1
-            except: pass
-            
-        logger.info(f"外部歌曲元数据已清除: {filename}, 删除文件数: {deleted_count}")
-        return jsonify({'success': True})
-    except Exception as e: 
-        logger.warning(f"元数据清除失败: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 # --- 辅助接口 ---
