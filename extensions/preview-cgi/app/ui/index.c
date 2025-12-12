@@ -106,10 +106,11 @@ void serve_static_file(const char *rel_path) {
 
     FILE *f = fopen(filepath, "rb");
     if (!f) {
-        // 尝试 fallback 到 preview.html (如果是 SPA 刷新的话)
-        // 但对于静态资源 (js/css/png) 不应该 fallback
+        // 尝试 fallback 到 preview.html
         // 简单处理：严格 404
-        error_response(404, "File Not Found");
+        char err_msg[2048];
+        snprintf(err_msg, sizeof(err_msg), "File Not Found: %s", filepath);
+        error_response(404, err_msg);
     }
 
     const char *mime = get_mime_type(filepath);
