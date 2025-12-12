@@ -22,7 +22,7 @@
         (function () {
             function setScale() {
                 if (window.innerWidth > 768) {
-                    let scale = Math.min(Math.max(window.innerWidth / 1440, 0.8), 1.0);
+                    let scale = Math.min(Math.max(window.innerWidth / 1440, 0.8), 1.2);
                     document.documentElement.style.setProperty('--ui-scale', scale.toFixed(3));
                 } else {
                     document.documentElement.style.setProperty('--ui-scale', '1.0');
@@ -37,6 +37,138 @@
     <script src="{{ url_for('static', filename='js/lib/color-thief.umd.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/font-awesome/all.min.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
+    <style>
+        /* 缩放控制样式 */
+        .scale-control-container {
+            padding: 1rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            margin-top: auto;
+            display: none;
+        }
+
+        .scale-control-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+            color: var(--text-dim);
+            font-size: 0.9rem;
+        }
+
+        .scale-control-slider {
+            margin-bottom: 0.75rem;
+        }
+
+        #ui-scale-slider {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: linear-gradient(to right, 
+                rgba(100, 100, 255, 0.3) 0%, 
+                rgba(100, 100, 255, 0.8) 100%);
+            outline: none;
+            -webkit-appearance: none;
+            margin-bottom: 0.5rem;
+        }
+
+        #ui-scale-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: var(--primary);
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .scale-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            padding: 0 0.25rem;
+        }
+
+        .scale-labels span:nth-child(2) {
+            color: var(--primary);
+            font-weight: bold;
+        }
+
+        .scale-reset-btn {
+            width: 100%;
+            padding: 0.5rem;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 0.5rem;
+            color: var(--text-dim);
+            cursor: pointer;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            transition: all 0.2s ease;
+        }
+
+        .scale-reset-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: var(--text-main);
+        }
+
+        /* 移动端适配 */
+        @media (max-width: 768px) {
+            .scale-control-container {
+                position: fixed;
+                bottom: 70px;
+                left: 0;
+                right: 0;
+                background: var(--bg-panel);
+                border-top: 1px solid rgba(255, 255, 255, 0.1);
+                padding: 1rem;
+                z-index: 1000;
+                display: none;
+            }
+            
+            .scale-control-container.show {
+                display: block;
+                animation: slideUp 0.3s ease;
+            }
+            
+            @keyframes slideUp {
+                from {
+                    transform: translateY(100%);
+                }
+                to {
+                    transform: translateY(0);
+                }
+            }
+            
+            #scale-control-toggle {
+                position: fixed;
+                bottom: 80px;
+                right: 20px;
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                background: var(--primary);
+                color: white;
+                border: none;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+                z-index: 1000;
+                transition: all 0.3s ease;
+            }
+
+            #scale-control-toggle:hover {
+                transform: scale(1.1);
+            }
+        }
+    </style>
 </head>
 
 <body>
@@ -59,6 +191,30 @@
                     <li id="nav-upload"><i class="fas fa-cloud-upload-alt"></i> <span>上传音乐</span></li>
                 </ul>
             </nav>
+            
+            <!-- 缩放控制容器 -->
+            <div class="scale-control-container" id="scale-control-container">
+                <div class="scale-control-header">
+                    <i class="fas fa-search-plus"></i>
+                    <span>界面缩放</span>
+                </div>
+                <div class="scale-control-slider">
+                    <input type="range" 
+                           id="ui-scale-slider" 
+                           min="0.6" 
+                           max="1.4" 
+                           step="0.05" 
+                           value="1.0">
+                    <div class="scale-labels">
+                        <span>小</span>
+                        <span>默认</span>
+                        <span>大</span>
+                    </div>
+                </div>
+                <button id="reset-scale" class="scale-reset-btn">
+                    <i class="fas fa-undo-alt"></i> 重置
+                </button>
+            </div>
         </aside>
 
         <main id="main-content">
@@ -503,6 +659,222 @@
             } catch (e) { console.error('Fast init error', e); }
         })();
     </script>
+    
+    <script>
+        // 缩放控制脚本
+        (function() {
+            // 初始化缩放控制
+            function initScaleControl() {
+                const scaleSlider = document.getElementById('ui-scale-slider');
+                const resetScaleBtn = document.getElementById('reset-scale');
+                const scaleControlContainer = document.querySelector('.scale-control-container');
+                
+                if (!scaleSlider) return;
+                
+                // 从 localStorage 读取保存的缩放值
+                const savedScale = localStorage.getItem('2fmusic_ui_scale');
+                const initialScale = savedScale ? parseFloat(savedScale) : 1.0;
+                
+                // 设置滑块初始值
+                scaleSlider.value = initialScale;
+                updateUIScale(initialScale);
+                updateSliderBackground(initialScale);
+                
+                // 显示缩放控制（PC端默认显示，移动端隐藏）
+                if (window.innerWidth > 768) {
+                    scaleControlContainer.style.display = 'block';
+                }
+                
+                // 滑块变化事件
+                scaleSlider.addEventListener('input', (e) => {
+                    const scale = parseFloat(e.target.value);
+                    updateUIScale(scale);
+                    updateSliderBackground(scale);
+                    saveScaleToStorage(scale);
+                });
+                
+                // 重置按钮点击事件
+                if (resetScaleBtn) {
+                    resetScaleBtn.addEventListener('click', () => {
+                        scaleSlider.value = 1.0;
+                        updateUIScale(1.0);
+                        updateSliderBackground(1.0);
+                        saveScaleToStorage(1.0);
+                        showToast('已重置缩放比例');
+                    });
+                }
+                
+                // 替换原有的缩放逻辑，改为响应式 + 用户控制
+                function setScale() {
+                    const userScale = parseFloat(scaleSlider.value);
+                    const baseScale = window.innerWidth > 768 ? 
+                        Math.min(Math.max(window.innerWidth / 1440, 0.8), 1.2) : 1.0;
+                    const finalScale = userScale * baseScale;
+                    
+                    document.documentElement.style.setProperty('--ui-scale', finalScale.toFixed(3));
+                }
+                
+                // 监听窗口大小变化
+                window.addEventListener('resize', function() {
+                    // 移动端切换显示/隐藏
+                    if (window.innerWidth <= 768) {
+                        scaleControlContainer.style.display = 'none';
+                        const toggleBtn = document.getElementById('scale-control-toggle');
+                        if (toggleBtn) toggleBtn.style.display = 'none';
+                    } else {
+                        scaleControlContainer.style.display = 'block';
+                        const toggleBtn = document.getElementById('scale-control-toggle');
+                        if (toggleBtn) toggleBtn.style.display = 'none';
+                    }
+                    setScale();
+                });
+                
+                // 初始化设置一次
+                setScale();
+                
+                // 为移动端创建浮动按钮
+                if (window.innerWidth <= 768) {
+                    createMobileScaleButton();
+                }
+            }
+            
+            // 更新页面缩放
+            function updateUIScale(scale) {
+                // 应用基础响应式缩放
+                const baseScale = window.innerWidth > 768 ? 
+                    Math.min(Math.max(window.innerWidth / 1440, 0.8), 1.2) : 1.0;
+                const finalScale = scale * baseScale;
+                
+                document.documentElement.style.setProperty('--ui-scale', finalScale.toFixed(3));
+            }
+            
+            // 更新滑块背景
+            function updateSliderBackground(value) {
+                const slider = document.getElementById('ui-scale-slider');
+                const min = parseFloat(slider.min);
+                const max = parseFloat(slider.max);
+                const percent = ((value - min) / (max - min)) * 100;
+                
+                slider.style.background = `linear-gradient(to right, 
+                    rgba(100, 100, 255, 0.8) 0%, 
+                    rgba(100, 100, 255, 0.8) ${percent}%, 
+                    rgba(255, 255, 255, 0.1) ${percent}%, 
+                    rgba(255, 255, 255, 0.1) 100%)`;
+            }
+            
+            // 保存缩放设置到 localStorage
+            function saveScaleToStorage(scale) {
+                try {
+                    localStorage.setItem('2fmusic_ui_scale', scale.toString());
+                } catch (e) {
+                    console.error('Failed to save scale setting:', e);
+                }
+            }
+            
+            // 显示提示信息
+            function showToast(message, duration = 2000) {
+                const toastContainer = document.getElementById('toast-container');
+                if (!toastContainer) return;
+                
+                const toast = document.createElement('div');
+                toast.className = 'toast';
+                toast.textContent = message;
+                
+                toastContainer.appendChild(toast);
+                
+                setTimeout(() => {
+                    toast.classList.add('hide');
+                    setTimeout(() => toast.remove(), 300);
+                }, duration);
+            }
+            
+            // 为移动端创建浮动按钮
+            function createMobileScaleButton() {
+                const button = document.createElement('button');
+                button.id = 'scale-control-toggle';
+                button.innerHTML = '<i class="fas fa-search"></i>';
+                button.title = '调整缩放';
+                button.style.display = 'flex';
+                
+                const container = document.querySelector('.scale-control-container');
+                
+                button.addEventListener('click', () => {
+                    container.classList.toggle('show');
+                });
+                
+                // 点击容器外部关闭
+                document.addEventListener('click', (e) => {
+                    if (!container.contains(e.target) && e.target !== button) {
+                        container.classList.remove('show');
+                    }
+                });
+                
+                document.body.appendChild(button);
+            }
+            
+            // 键盘快捷键支持
+            function initKeyboardShortcuts() {
+                document.addEventListener('keydown', (e) => {
+                    // 检查是否在输入框中
+                    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                        return;
+                    }
+                    
+                    const scaleSlider = document.getElementById('ui-scale-slider');
+                    if (!scaleSlider) return;
+                    
+                    let currentScale = parseFloat(scaleSlider.value);
+                    const minScale = parseFloat(scaleSlider.min);
+                    const maxScale = parseFloat(scaleSlider.max);
+                    const step = parseFloat(scaleSlider.step);
+                    
+                    if ((e.ctrlKey || e.metaKey) && e.key === '=') {
+                        // Ctrl + + 放大
+                        e.preventDefault();
+                        const newScale = Math.min(currentScale + step, maxScale);
+                        scaleSlider.value = newScale;
+                        updateUIScale(newScale);
+                        updateSliderBackground(newScale);
+                        saveScaleToStorage(newScale);
+                        showToast(`缩放: ${Math.round(newScale * 100)}%`);
+                    }
+                    
+                    if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+                        // Ctrl + - 缩小
+                        e.preventDefault();
+                        const newScale = Math.max(currentScale - step, minScale);
+                        scaleSlider.value = newScale;
+                        updateUIScale(newScale);
+                        updateSliderBackground(newScale);
+                        saveScaleToStorage(newScale);
+                        showToast(`缩放: ${Math.round(newScale * 100)}%`);
+                    }
+                    
+                    if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+                        // Ctrl + 0 重置
+                        e.preventDefault();
+                        scaleSlider.value = 1.0;
+                        updateUIScale(1.0);
+                        updateSliderBackground(1.0);
+                        saveScaleToStorage(1.0);
+                        showToast('已重置缩放比例');
+                    }
+                });
+            }
+            
+            // 页面加载完成后初始化
+            document.addEventListener('DOMContentLoaded', () => {
+                initScaleControl();
+                initKeyboardShortcuts();
+                
+                // 添加CSS变量定义
+                if (!document.documentElement.style.getPropertyValue('--ui-scale')) {
+                    document.documentElement.style.setProperty('--ui-scale', '1.0');
+                }
+            });
+        })();
+    </script>
+    
     <script type="module" src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 
