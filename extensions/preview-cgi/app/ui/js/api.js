@@ -11,7 +11,10 @@ const API_BASE = "index.cgi";
 export const api = {
     API_BASE,
     library: {
-
+        async list() {
+            const res = await fetch(`${API_BASE}/api/music`);
+            return jsonOrThrow(res);
+        },
         async externalMeta(path) {
             const res = await fetch(`${API_BASE}/api/music/external/meta?path=${encodeURIComponent(path)}`);
             return jsonOrThrow(res);

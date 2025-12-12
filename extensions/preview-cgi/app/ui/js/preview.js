@@ -55,6 +55,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     const params = new URLSearchParams(window.location.search);
     let path = params.get('path') || params.get('file') || params.get('filepath') || params.get('url') || params.get('src');
 
+    // 同步收藏状态
+    try {
+        const musicList = await api.library.list();
+        if (musicList && musicList.length) {
+            // 重建收藏集合（以服务器为准）
+            state.favorites = new Set(musicList.map(song => song.filename));
+            localStorage.setItem('2fmusic_favs', JSON.stringify([...state.favorites]));
+        }
+    } catch (e) {
+        console.warn('同步收藏失败:', e);
+    }
+
     if (path) {
         await loadPreviewTrack(path);
     } else {
