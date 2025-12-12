@@ -1549,7 +1549,7 @@ def netease_login_status():
                         if code <= 0:
                             return False
                         if exp is None:
-                            return True
+                            return False
                         try:
                             return int(exp) > now_ms
                         except Exception:
@@ -1562,8 +1562,7 @@ def netease_login_status():
                             _active(data.get('associator')),
                             _active(data.get('musicPackage')),
                             _active(data.get('redplus')),
-                            _active(data.get('familyVip')),
-                            (data.get('redVipLevel') or 0) > 0
+                            _active(data.get('familyVip'))
                         ])
             except Exception as e:
                 logger.warning(f"获取VIP信息失败: {e}")
