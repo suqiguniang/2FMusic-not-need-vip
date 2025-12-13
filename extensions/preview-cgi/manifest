@@ -11,3 +11,4 @@ distributor           = yuexps
 distributor_url       = https://www.2fstore.cfd
 source                = thirdparty
 desktop_uidir         = ui
+install_dep_apps      = 2fmusic
