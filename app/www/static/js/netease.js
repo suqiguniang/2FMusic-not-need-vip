@@ -632,9 +632,12 @@ async function saveNeteaseConfig() {
   const apiBaseVal = ui.neteaseApiSettingsInput
     ? ui.neteaseApiSettingsInput.value.trim()
     : (ui.neteaseApiGateInput ? ui.neteaseApiGateInput.value.trim() : state.neteaseApiBase);
+
+  const payload = {};
+  if (dir) payload.download_dir = dir;
   if (apiBaseVal) payload.api_base = apiBaseVal;
 
-  if (!payload.download_dir && !payload.api_base && !payload.quality) { showToast('未修改任何配置'); return; }
+  if (!payload.download_dir && !payload.api_base) { showToast('未修改任何配置'); return; }
   try {
     const json = await api.netease.configSave(payload);
     if (json.success) {
