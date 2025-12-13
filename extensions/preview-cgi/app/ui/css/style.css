@@ -177,6 +177,7 @@ body {
     font-size: 1.2rem;
     transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     cursor: pointer;
+    pointer-events: auto !important;
     text-align: center;
     white-space: normal;
     word-break: break-word;
@@ -460,7 +461,7 @@ body {
     }
 
     .fp-buttons {
-        gap: 1rem;
+        gap: 2rem;
     }
 
     .play-huge {

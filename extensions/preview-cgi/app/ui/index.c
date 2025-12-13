@@ -205,6 +205,13 @@ void proxy_request(const char *rel_path) {
     char *x_requested_with = getenv("HTTP_X_REQUESTED_WITH");
     if (x_requested_with) dprintf(sock, "X-Requested-With: %s\r\n", x_requested_with);
 
+    // Forward Range Headers for Audio Seeking
+    char *range = getenv("HTTP_RANGE");
+    if (range) dprintf(sock, "Range: %s\r\n", range);
+
+    char *if_range = getenv("HTTP_IF_RANGE");
+    if (if_range) dprintf(sock, "If-Range: %s\r\n", if_range);
+
     // Forward Proxy Headers for Flask ProxyFix
     char *http_host = getenv("HTTP_HOST");
     if (http_host) dprintf(sock, "X-Forwarded-Host: %s\r\n", http_host);

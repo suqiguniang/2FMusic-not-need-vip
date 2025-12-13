@@ -60,10 +60,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const favList = await api.favorites.list(); // 使用 API 获取
         if (favList.success && favList.data) {
             state.favorites = new Set(favList.data);
-            if (state.track && state.track.filename) {
-                // 如果是数字ID，则直接判断；否则尝试匹配（预览模式通常已有ID或文件名）
-                // 这里暂简单判断
-                updateFavBtn(state.favorites.has(state.track.filename));
+            if (state.track) {
+                updateFavBtn(checkIsFavorite(state.track));
             }
         }
     } catch (e) {
@@ -132,31 +130,33 @@ function bindEvents() {
             state.isDragging = false;
             // Ensure final value is applied
             const pct = parseFloat(e.target.value);
-            if (state.duration) state.audio.currentTime = (pct / 100) * state.duration;
+            // Use state.duration but fallback to audio duration if 0/null
+            const duration = state.duration || state.audio.duration;
+            if (duration) {
+                state.audio.currentTime = (pct / 100) * duration;
+                if (!state.isPlaying) state.audio.play().catch(console.error);
+            }
         };
 
         ui.progressBar.addEventListener('mousedown', startDrag);
         ui.progressBar.addEventListener('touchstart', startDrag, { passive: true });
 
-        ui.progressBar.addEventListener('change', endDrag);
-        ui.progressBar.addEventListener('mouseup', endDrag);
-        ui.progressBar.addEventListener('touchend', endDrag);
+        ui.progressBar.addEventListener('change', endDrag); // Final commit
+
+        // Use simpler logic for drag end
+        ui.progressBar.addEventListener('mouseup', () => state.isDragging = false);
+        ui.progressBar.addEventListener('touchend', () => state.isDragging = false);
 
         ui.progressBar.addEventListener('input', (e) => {
             state.isDragging = true; // 正在输入时保持拖拽状态
             const pct = parseFloat(e.target.value);
             updateSliderFill(e.target);
-            // 实时拖拽更新时间（防抖会在 endDrag 处理，这里仅做视觉反馈）
-            if (state.duration) {
-                const time = (pct / 100) * state.duration;
-                updateTimeDisplay(time, state.duration);
-                // Debouncing seek or doing it only on endDrag is often smoother, 
-                // but immediate seek is requested by current code logic.
-                // We only update time display here, audio seek can wait or be throttled?
-                // Main app likely seeks on input. Let's keep it.
-                if (Math.abs(state.audio.currentTime - time) > 1) { // Only seek if diff > 1s to avoid stutter
-                    state.audio.currentTime = time;
-                }
+
+            // 实时拖拽更新时间（仅视觉反馈，不设置 currentTime 以避免冲突）
+            const duration = state.duration || state.audio.duration;
+            if (duration) {
+                const time = (pct / 100) * duration;
+                updateTimeDisplay(time, duration);
             }
         });
         updateSliderFill(ui.progressBar);
@@ -168,8 +168,10 @@ function bindEvents() {
             const line = e.target.closest('.lyric-line');
             if (line && line.dataset.time !== undefined) {
                 const time = parseFloat(line.dataset.time);
-                if (!isNaN(time) && state.duration) {
-                    state.audio.currentTime = time;
+                const duration = state.duration || state.audio.duration;
+                if (!isNaN(time) && duration) {
+                    // Safe guard: don't seek past duration
+                    state.audio.currentTime = Math.min(time, duration);
                     if (!state.isPlaying) state.audio.play().catch(console.error);
                 }
             }
@@ -225,8 +227,8 @@ async function syncFavorites() {
             // 简单比较是否变更
             if (serverFavs.size !== state.favorites.size || [...serverFavs].some(id => !state.favorites.has(id))) {
                 state.favorites = serverFavs;
-                if (state.track && state.track.filename) {
-                    updateFavBtn(state.favorites.has(state.track.filename));
+                if (state.track) {
+                    updateFavBtn(checkIsFavorite(state.track));
                 }
                 // Update local storage for other tabs on same device
                 localStorage.setItem('2fmusic_favs', JSON.stringify([...state.favorites]));
@@ -256,6 +258,7 @@ async function loadPreviewTrack(path) {
             artist: song.artist || "未知艺术家",
             album: song.album || "未知专辑",
             filename: song.id || song.filename || path, // 优先使用 ID
+            realPath: path, // 记录原始路径用于匹配
             cover: toProxyUrl(song.album_art) || `${api.API_BASE}/images/icon_256.png`,
             src: `${api.API_BASE}/api/music/external/play?path=${encodeURIComponent(path)}`,
             duration: 0
@@ -301,7 +304,25 @@ function updateTrackUi() {
             // Reset gradient if default (no-op) 
         }
     }
-    updateFavBtn(state.favorites.has(state.track.filename));
+    updateFavBtn(checkIsFavorite(state.track));
+}
+
+// 辅助：检查是否收藏 (由 loose matching)
+function checkIsFavorite(track) {
+    if (!track || !state.favorites) return false;
+    const id = track.filename;
+
+    // 1. Direct match
+    if (state.favorites.has(id)) return true;
+
+    // 2. String/Number type mismatch
+    if (state.favorites.has(String(id))) return true;
+    if (typeof id === 'string' && /^\d+$/.test(id) && state.favorites.has(Number(id))) return true;
+
+    // 3. Fallback to path if available (external files sometimes tracked by path hash or raw path)
+    if (track.realPath && state.favorites.has(track.realPath)) return true;
+
+    return false;
 }
 
 function updatePlayBtn() {
