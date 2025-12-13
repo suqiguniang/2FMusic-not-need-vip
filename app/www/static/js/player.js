@@ -940,8 +940,13 @@ export function bindUiControls() {
       } else {
         const color = extractColorFromImage(fpCover);
         if (color) {
+          // 移动端防止背景太透导致看到下面的列表 (透视问题)
+          const isMobile = window.innerWidth <= 768;
+          const alpha = isMobile ? 0.98 : 0.8;
+          const rgbaStr = `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
+
           // 1. 设置全屏背景渐变
-          ui.fullPlayerOverlay.style.background = `linear-gradient(to bottom, ${color.toString()} 0%, #000 120%)`;
+          ui.fullPlayerOverlay.style.background = `linear-gradient(to bottom, ${rgbaStr} 0%, #000 120%)`;
 
           // 2. 设置动态菜单背景色 (使用提取的 RGB + 0.6 透明度)
           // 这样 Action Menu 就有了跟随封面的半透明背景

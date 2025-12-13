@@ -189,7 +189,7 @@ export function extractColorFromImage(imgEl) {
       }
     }
 
-    // 降级方案：Canvas 取中心像素 (不仅仅是左上角)
+    // 降级方案：Canvas 取中心像素
     const canvas = document.createElement('canvas');
     canvas.width = 1;
     canvas.height = 1;
