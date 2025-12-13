@@ -1597,9 +1597,6 @@ def import_music_by_path():
         # 查重 (与上传保持一致)
         if os.path.exists(dst_path):
              # 目标已存在 (文件名冲突)
-             # 虽然是同名，但这里我们覆盖检查
-             # TODO: 用户可能希望覆盖? 暂时保持原逻辑: 如果存在则跳过复制, 并返回 'filename' or 'id'
-             # 但为了去重，我们要检查内容是否也重复
              pass
 
         # 全局查重
@@ -1608,7 +1605,6 @@ def import_music_by_path():
              dup = conn.execute("SELECT path FROM songs WHERE filename=? AND size=?", (filename, src_size)).fetchone()
              if dup:
                  # 如果已存在的文件就是目标位置的文件（即重复导入自己），则是允许的（当作刷新）
-                 # 但 dst_path 还没复制过去。如果 exists(dst_path) 上面会处理。
                  # 如果 duplicates path != dst_path -> 真正的异地重复 -> 报错
                  if dup['path'] != os.path.abspath(dst_path):
                      return jsonify({'success': False, 'error': f'音乐库中已存在相同文件: {dup["path"]}'})
@@ -2287,8 +2283,15 @@ def get_external_meta():
         album_art = None
         base_name = os.path.splitext(os.path.basename(path))[0]
         cached_cover = os.path.join(MUSIC_LIBRARY_PATH, 'covers', f"{base_name}.jpg")
+        cached_cover = os.path.join(MUSIC_LIBRARY_PATH, 'covers', f"{base_name}.jpg")
         if os.path.exists(cached_cover): album_art = f"/api/music/covers/{quote(base_name)}.jpg?filename={quote(base_name)}"
-        return jsonify({'success': True, 'data': {'id': song_id, 'filename': path, 'title': meta['title'] or os.path.basename(path), 'artist': meta['artist'] or '未知艺术家', 'album': meta['album'] or '', 'album_art': album_art}})
+        
+        in_library = False
+        with get_db() as conn:
+             if conn.execute("SELECT 1 FROM songs WHERE id=?", (song_id,)).fetchone():
+                 in_library = True
+
+        return jsonify({'success': True, 'data': {'id': song_id, 'filename': path, 'title': meta['title'] or os.path.basename(path), 'artist': meta['artist'] or '未知艺术家', 'album': meta['album'] or '', 'album_art': album_art, 'in_library': in_library}})
     except Exception as e: return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/music/external/play')

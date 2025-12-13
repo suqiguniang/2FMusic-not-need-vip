@@ -259,6 +259,7 @@ async function loadPreviewTrack(path) {
             album: song.album || "未知专辑",
             filename: song.id || song.filename || path, // 优先使用 ID
             realPath: path, // 记录原始路径用于匹配
+            in_library: song.in_library, // 明确的在库状态
             cover: toProxyUrl(song.album_art) || `${api.API_BASE}/images/icon_256.png`,
             src: `${api.API_BASE}/api/music/external/play?path=${encodeURIComponent(path)}`,
             duration: 0
@@ -342,33 +343,56 @@ function togglePlay() {
 
 async function fetchMetadata(track) {
     const query = `?title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist)}&filename=${encodeURIComponent(track.filename)}`;
+    const cacheKeyBase = track.filename || track.title; // Fallback
 
     // Lyrics
-    api.library.lyrics(query).then(d => {
-        if (d.success && d.lyrics) renderLyrics(d.lyrics);
-        else renderNoLyrics("暂无歌词");
-    }).catch(() => renderNoLyrics("歌词加载失败"));
+    const lrcKey = `2f_cache_lrc_${cacheKeyBase}`;
+    const cachedLrc = localStorage.getItem(lrcKey);
+    if (cachedLrc) {
+        renderLyrics(cachedLrc);
+    } else {
+        api.library.lyrics(query).then(d => {
+            if (d.success && d.lyrics) {
+                localStorage.setItem(lrcKey, d.lyrics);
+                renderLyrics(d.lyrics);
+            }
+            else renderNoLyrics("暂无歌词");
+        }).catch(() => renderNoLyrics("歌词加载失败"));
+    }
 
     // 封面（同主程序逻辑：如果是默认图标则尝试获取封面）
     if (track.cover.includes('icon_256')) {
-        api.library.albumArt(query).then(d => {
-            if (d.success && d.album_art) {
-                track.cover = toProxyUrl(d.album_art);
-                if (ui.cover) {
-                    ui.cover.src = track.cover + '&t=' + Date.now();
-                    // 提取颜色
-                    if (window.ColorThief) {
-                        ui.cover.onload = () => updateBgColor(ui.cover);
-                    }
+        const coverKey = `2f_cache_cover_${cacheKeyBase}`;
+        const cachedCover = localStorage.getItem(coverKey);
+
+        if (cachedCover) {
+            track.cover = cachedCover;
+            applyCover(track.cover);
+        } else {
+            api.library.albumArt(query).then(d => {
+                if (d.success && d.album_art) {
+                    track.cover = toProxyUrl(d.album_art);
+                    localStorage.setItem(coverKey, track.cover);
+                    applyCover(track.cover);
                 }
-            }
-        });
+            });
+        }
     } else {
         // 已有封面，直接提取颜色
         if (window.ColorThief && ui.cover) {
             // 确保图片加载完成后提取颜色
             if (ui.cover.complete) updateBgColor(ui.cover);
             else ui.cover.onload = () => updateBgColor(ui.cover);
+        }
+    }
+}
+
+function applyCover(url) {
+    if (ui.cover) {
+        ui.cover.src = url.includes('?') ? (url + '&t=' + Date.now()) : url;
+        // 提取颜色
+        if (window.ColorThief) {
+            ui.cover.onload = () => updateBgColor(ui.cover);
         }
     }
 }
@@ -502,8 +526,8 @@ async function toggleFavorite() {
         // 添加收藏
         // 2. 检查来源：如果是外部文件 (ID 看起来像路径，或者 URL 指向 external)
         if (state.track.src && state.track.src.includes(`${api.API_BASE}/api/music/external/play`)) {
-            // 如果已经是纯数字ID，说明已经是库内文件
-            if (/^\d+$/.test(songId) || /^[0-9a-f]{32}$/.test(songId)) { // 简单的一级判断，实际 ID生成规则可能变
+            // 如果已经在库中 (由后端 meta 明确告知)
+            if (state.track.in_library) {
                 updateFavBtn(true);
                 state.favorites.add(songId);
                 try { await api.favorites.add(songId); showToast("已收藏"); }
@@ -524,6 +548,7 @@ async function toggleFavorite() {
                     const id = res.id || res.filename; // Prefer ID, fallback to filename (legacy)
                     state.track.id = id; // Store ID
                     state.track.filename = id; // CRITICAL: Update filename property as toggleFavorite uses this!
+                    state.track.in_library = true; // 标记已入库
                     state.favorites.add(id);
 
                     // 导入后自动添加到收藏
