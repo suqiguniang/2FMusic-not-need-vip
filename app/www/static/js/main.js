@@ -4,7 +4,7 @@ import { autoResizeUI, showToast, persistOnUnload } from './utils.js';
 import { api } from './api.js';
 import { initNetease } from './netease.js';
 import { initMounts, loadMountPoints, startScanPolling } from './mounts.js';
-import { initPlayer, loadSongs, performDelete, handleExternalFile, renderPlaylist } from './player.js';
+import { initPlayer, loadSongs, performDelete, handleExternalFile, renderPlaylist, switchTab } from './player.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
   // UI 适配与基础防护
@@ -37,19 +37,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const uploadDropzone = document.getElementById('upload-dropzone');
   const uploadChooseBtn = document.getElementById('upload-choose-btn');
   const uploadStatus = document.getElementById('upload-status');
-  const views = ['view-player', 'view-mount', 'view-netease', 'view-upload'];
-
-  function switchView(targetId) {
-    views.forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.classList.toggle('hidden', id !== targetId);
-    });
-  }
-
-  function setActiveNav(targetEl) {
-    document.querySelectorAll('aside nav li').forEach(li => li.classList.remove('active'));
-    if (targetEl) targetEl.classList.add('active');
-  }
+  // const views = ['view-player', 'view-mount', 'view-netease', 'view-upload', 'view-settings']; - REMOVED
 
   function setUploadTarget(value, label) {
     if (uploadTargetInput) uploadTargetInput.value = value || '';
@@ -81,12 +69,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     ui.navUpload.addEventListener('click', () => {
-      switchView('view-upload');
-      setActiveNav(ui.navUpload);
+      switchTab('upload'); // Used switchTab
       populateUploadTargets();
-      if (window.innerWidth <= 768 && ui.sidebar?.classList.contains('open')) {
-        ui.sidebar.classList.remove('open');
-      }
+      // Mobile sidebar handled in switchTab
     });
 
     const handleFile = (file) => {
@@ -146,16 +131,78 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // 其他导航：回到播放器或对应视图
-  if (ui.navLocal) ui.navLocal.addEventListener('click', () => { switchView('view-player'); setActiveNav(ui.navLocal); });
-  if (ui.navFav) ui.navFav.addEventListener('click', () => { switchView('view-player'); setActiveNav(ui.navFav); });
-  if (ui.navMount) ui.navMount.addEventListener('click', () => { switchView('view-mount'); setActiveNav(ui.navMount); });
-  if (ui.navNetease) ui.navNetease.addEventListener('click', () => { switchView('view-netease'); setActiveNav(ui.navNetease); });
+  if (ui.navLocal) ui.navLocal.addEventListener('click', () => { switchTab('local'); });
+  if (ui.navFav) ui.navFav.addEventListener('click', () => { switchTab('fav'); });
+  if (ui.navMount) ui.navMount.addEventListener('click', () => { switchTab('mount'); });
+  if (ui.navNetease) ui.navNetease.addEventListener('click', () => { switchTab('netease'); });
+  if (ui.navSettings) ui.navSettings.addEventListener('click', () => { switchTab('settings'); });
+
+  // Settings Logic
+  function initSettings() {
+    if (!ui.scaleInput) return;
+
+    const updateSliderVisual = (val) => {
+      // Map 0.6-1.4 to 0-100%
+      const min = 0.6, max = 1.4;
+      const pct = ((val - min) / (max - min)) * 100;
+      ui.scaleInput.style.backgroundSize = `${pct}% 100%`;
+    };
+
+    const updateLabel = (val) => {
+      if (ui.scaleValue) ui.scaleValue.innerText = val ? parseFloat(val).toFixed(2) : '自动';
+      if (val) updateSliderVisual(parseFloat(val));
+    };
+
+    // Load initial
+    const saved = localStorage.getItem('2fmusic_ui_scale');
+    if (saved) {
+      ui.scaleInput.value = saved;
+      updateLabel(saved);
+    } else {
+      // If auto, set slider to computed or 1.0 (approximated)
+      const current = getComputedStyle(document.documentElement).getPropertyValue('--ui-scale').trim();
+      const val = parseFloat(current) || 1.0;
+      ui.scaleInput.value = val;
+      updateSliderVisual(val);
+      if (ui.scaleValue) ui.scaleValue.innerText = '自动';
+    }
+
+    let rafId = null;
+    ui.scaleInput.addEventListener('input', (e) => {
+      const val = e.target.value;
+
+      // Update visual immediately
+      updateLabel(val);
+
+      // Throttle heavy layout updates
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        document.documentElement.style.setProperty('--ui-scale', val);
+      });
+    });
+
+    ui.scaleInput.addEventListener('change', (e) => {
+      // Save only on release/commit
+      localStorage.setItem('2fmusic_ui_scale', e.target.value);
+    });
+
+    ui.scaleReset?.addEventListener('click', () => {
+      localStorage.removeItem('2fmusic_ui_scale');
+      if (window.applyScale) window.applyScale(); // Re-trigger auto calc
+      const current = getComputedStyle(document.documentElement).getPropertyValue('--ui-scale').trim();
+      const val = parseFloat(current);
+      ui.scaleInput.value = val;
+      updateSliderVisual(val);
+      if (ui.scaleValue) ui.scaleValue.innerText = '自动';
+      showToast('已重置为自动缩放');
+    });
+  }
+  initSettings();
 
   // 初始化模块
   initMounts(loadSongs);
   await initPlayer();   // 优先初始化播放器，确保缓存秒开
   await initNetease(loadSongs);
-  loadMountPoints();
   loadMountPoints();
   startScanPolling(false, (r) => loadSongs(r, false), loadMountPoints);
 });

@@ -651,7 +651,6 @@ async function saveNeteaseConfig() {
       processDownloadQueue();
       toggleNeteaseGate(!!state.neteaseApiBase);
       showToast('保存成功');
-      closeSettingsModal();
     } else {
       showToast(json.error || '保存失败');
     }
@@ -678,7 +677,6 @@ async function bindNeteaseApi() {
         showToast('连接成功');
         toggleNeteaseGate(true);
         refreshLoginStatus();
-        closeSettingsModal();
       } else {
         showToast('无法连接到该 API 地址');
       }
@@ -884,21 +882,7 @@ function logoutNetease() {
     });
 }
 
-function openSettingsModal() {
-  if (ui.neteaseApiSettingsInput) ui.neteaseApiSettingsInput.value = state.neteaseApiBase || '';
-  if (ui.neteaseDownloadDirInput) ui.neteaseDownloadDirInput.value = state.neteaseDownloadDir || '';
-  if (ui.neteaseSettingsModal) {
-    ui.neteaseSettingsModal.classList.remove('hidden');
-    ui.neteaseSettingsModal.classList.add('active');
-  }
-}
 
-function closeSettingsModal() {
-  if (ui.neteaseSettingsModal) {
-    ui.neteaseSettingsModal.classList.add('hidden');
-    ui.neteaseSettingsModal.classList.remove('active');
-  }
-}
 
 function bindEvents() {
   ui.neteaseSearchBtn?.addEventListener('click', searchNeteaseSongs);
@@ -913,8 +897,7 @@ function bindEvents() {
   });
 
   // Settings Modal
-  ui.neteaseSettingsBtn?.addEventListener('click', openSettingsModal);
-  ui.neteaseCloseSettingsBtn?.addEventListener('click', closeSettingsModal);
+
 
   ui.neteaseSaveDirBtn?.addEventListener('click', saveNeteaseConfig);
   if (ui.neteaseSelectAll) ui.neteaseSelectAll.addEventListener('change', (e) => {
@@ -933,7 +916,6 @@ function bindEvents() {
   ui.neteaseApiGateBtn?.addEventListener('click', bindNeteaseApi);
   if (ui.neteaseChangeApiBtn) ui.neteaseChangeApiBtn.addEventListener('click', () => {
     toggleNeteaseGate(false);
-    closeSettingsModal();
   });
   ui.neteaseOpenConfigBtn?.addEventListener('click', () => {
     ui.neteaseApiGateInput.focus();

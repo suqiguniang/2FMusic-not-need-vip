@@ -687,8 +687,6 @@ def scan_library_incremental():
             
             # 删除不存在的文件
             # 注意：如果某个挂载点被临时拔出，这里会删除其歌曲。
-            # 为了稳健，如果根目录都不存在，应该跳过删除该目录下的歌曲？
-            # 暂时简化处理：只删除那些“在其父目录仍然存在但文件消失”的情况？
             # 简单起见：全量比对，消失即删除。
             to_delete_paths = set(db_rows.keys()) - set(disk_files.keys())
             if to_delete_paths:
@@ -766,7 +764,7 @@ def scan_library_incremental():
                     cursor.executemany('''
                         INSERT OR REPLACE INTO songs (id, path, filename, title, artist, album, mtime, size, has_cover)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', to_update_db)
+                    ''', final_update_db)
                     conn.commit()
 
         logger.info("扫描完成。")

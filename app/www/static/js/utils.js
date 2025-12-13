@@ -15,6 +15,12 @@ export function throttle(func, limit) {
 }
 
 export function autoResizeUI() {
+  const saved = localStorage.getItem('2fmusic_ui_scale');
+  if (saved) {
+    document.documentElement.style.setProperty('--ui-scale', saved);
+    return;
+  }
+
   if (window.innerWidth > 768) {
     const scale = Math.min(Math.max(window.innerWidth / 1440, 0.8), 1.2);
     document.documentElement.style.setProperty('--ui-scale', scale.toFixed(3));

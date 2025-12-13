@@ -235,34 +235,39 @@ export function renderPlaylist() {
   highlightCurrentTrack();
 }
 
-function switchTab(tab) {
+export function switchTab(tab) {
   state.currentTab = tab;
   ui.navLocal?.classList.remove('active');
   ui.navFav?.classList.remove('active');
   ui.navMount?.classList.remove('active');
   ui.navNetease?.classList.remove('active');
-  ui.navUpload?.classList.remove('active'); // Also deactivate upload nav
+  ui.navUpload?.classList.remove('active');
+  ui.navSettings?.classList.remove('active');
 
-  ui.viewUpload?.classList.add('hidden'); // Ensure upload view is hidden
+  ui.viewPlayer?.classList.add('hidden');
+  ui.viewMount?.classList.add('hidden');
+  ui.viewNetease?.classList.add('hidden');
+  ui.viewUpload?.classList.add('hidden');
+  ui.viewSettings?.classList.add('hidden');
 
   if (tab === 'local') ui.navLocal?.classList.add('active');
   else if (tab === 'fav') ui.navFav?.classList.add('active');
   else if (tab === 'mount') ui.navMount?.classList.add('active');
   else if (tab === 'netease') ui.navNetease?.classList.add('active');
+  else if (tab === 'upload') ui.navUpload?.classList.add('active');
+  else if (tab === 'settings') ui.navSettings?.classList.add('active');
 
   if (tab === 'mount') {
-    ui.viewPlayer?.classList.add('hidden');
-    ui.viewNetease?.classList.add('hidden');
     ui.viewMount?.classList.remove('hidden');
     loadMountPoints();
   } else if (tab === 'netease') {
-    ui.viewPlayer?.classList.add('hidden');
-    ui.viewMount?.classList.add('hidden');
     ui.viewNetease?.classList.remove('hidden');
+  } else if (tab === 'upload') {
+    ui.viewUpload?.classList.remove('hidden');
+  } else if (tab === 'settings') {
+    ui.viewSettings?.classList.remove('hidden');
   } else {
     // local or fav
-    ui.viewMount?.classList.add('hidden');
-    ui.viewNetease?.classList.add('hidden');
     ui.viewPlayer?.classList.remove('hidden');
 
     // Styling hooks for CSS
@@ -285,7 +290,9 @@ function switchTab(tab) {
     'local': '本地音乐',
     'fav': '我的收藏',
     'mount': '挂载管理',
-    'netease': '网易下载'
+    'netease': '网易下载',
+    'upload': '上传音乐',
+    'settings': '系统设置'
   };
   if (ui.mobileTitle) ui.mobileTitle.innerText = titles[tab] || '2FMusic';
 
@@ -293,14 +300,11 @@ function switchTab(tab) {
   if (ui.searchInput && ui.searchInput.parentElement) {
     if (tab === 'local') {
       ui.searchInput.parentElement.style.display = 'flex';
-      // Give a small delay to allow display:flex to apply before opacity transition if we were to keep opacity, 
-      // but for now just show it.
       ui.searchInput.parentElement.style.opacity = '1';
     } else {
       ui.searchInput.parentElement.style.display = 'none';
       ui.searchInput.parentElement.style.opacity = '0';
       ui.searchInput.value = ''; // Clear search
-      // Trigger input event to reset list if needed, or just relying on renderPlaylist next time
     }
   }
   if (window.innerWidth <= 768 && ui.sidebar?.classList.contains('open')) ui.sidebar.classList.remove('open');
@@ -308,7 +312,7 @@ function switchTab(tab) {
 }
 
 async function initPlayerState() {
-  const allowedTabs = ['local', 'fav', 'mount', 'netease'];
+  const allowedTabs = ['local', 'fav', 'mount', 'netease', 'upload', 'settings'];
   const preferredTab = allowedTabs.includes(state.currentTab) ? state.currentTab : null;
   const savedTab = allowedTabs.includes(state.savedState.tab) ? state.savedState.tab : 'local';
   const targetTab = preferredTab || savedTab;

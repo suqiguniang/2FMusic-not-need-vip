@@ -33,9 +33,17 @@ export const ui = {
   neteaseLoginBtnTop: document.getElementById('netease-login-btn-top'),
   neteaseAvatarWrapper: document.getElementById('netease-avatar-wrapper'),
   neteaseVipBadge: document.getElementById('netease-vip-badge'),
-  neteaseSettingsBtn: document.getElementById('netease-settings-btn'),
-  neteaseSettingsModal: document.getElementById('netease-settings-modal'),
-  neteaseCloseSettingsBtn: document.getElementById('netease-close-settings'),
+  neteaseVipBadge: document.getElementById('netease-vip-badge'),
+  // neteaseSettingsBtn removed
+  // neteaseSettingsModal removed
+  // neteaseCloseSettingsBtn removed
+
+  navSettings: document.getElementById('nav-settings'),
+  viewSettings: document.getElementById('view-settings'),
+
+  scaleInput: document.getElementById('setting-scale-input'),
+  scaleValue: document.getElementById('setting-scale-value'),
+  scaleReset: document.getElementById('setting-scale-reset'),
 
   neteaseQualitySelect: document.getElementById('netease-quality'),
   neteaseResultList: document.getElementById('netease-result-list'),

@@ -20,16 +20,23 @@
 
     <script>
         (function () {
-            function setScale() {
-                if (window.innerWidth > 768) {
+            window.applyScale = function () {
+                const saved = localStorage.getItem('2fmusic_ui_scale');
+                if (saved) {
+                    document.documentElement.style.setProperty('--ui-scale', saved);
+                } else if (window.innerWidth > 768) {
                     let scale = Math.min(Math.max(window.innerWidth / 1440, 0.8), 1.2);
                     document.documentElement.style.setProperty('--ui-scale', scale.toFixed(3));
                 } else {
                     document.documentElement.style.setProperty('--ui-scale', '1.0');
                 }
-            }
-            setScale();
-            window.addEventListener('resize', setScale);
+            };
+            window.applyScale();
+            let rafId;
+            window.addEventListener('resize', () => {
+                if (rafId) cancelAnimationFrame(rafId);
+                rafId = requestAnimationFrame(window.applyScale);
+            });
         })();
     </script>
 
@@ -50,13 +57,18 @@
                 </a>
                 <span>2FMusic</span>
             </div>
-            <nav>
+            <nav style="flex: 1;">
                 <ul>
                     <li class="active" id="nav-local"><i class="fas fa-music"></i> <span>本地音乐</span></li>
                     <li id="nav-fav"><i class="fas fa-heart"></i> <span>我的收藏</span></li>
                     <li id="nav-mount"><i class="fas fa-network-wired"></i> <span>目录管理</span></li>
                     <li id="nav-netease"><i class="fas fa-cloud-download-alt"></i> <span>网易下载</span></li>
                     <li id="nav-upload"><i class="fas fa-cloud-upload-alt"></i> <span>上传音乐</span></li>
+                </ul>
+            </nav>
+            <nav>
+                <ul>
+                    <li id="nav-settings"><i class="fas fa-cog"></i> <span>设置</span></li>
                 </ul>
             </nav>
         </aside>
@@ -183,8 +195,6 @@
                                     </div>
                                 </div>
                                 <button id="netease-login-btn-top" class="btn-primary-small">登录</button>
-                                <button id="netease-settings-btn" class="icon-btn" title="设置"><i
-                                        class="fas fa-cog"></i></button>
                                 <button id="netease-download-floating" class="icon-btn" title="下载管理"><i
                                         class="fas fa-tasks"></i></button>
                             </div>
@@ -231,27 +241,43 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </div>
 
-                        <!-- Hidden Settings Modal/Panel (Triggered by settings button) -->
-                        <div id="netease-settings-modal" class="custom-overlay centered hidden">
-                            <div class="glass-panel settings-box">
-                                <h3>网易云设置</h3>
-                                <div class="setting-row">
-                                    <label>API 地址</label>
-                                    <input type="text" id="netease-api-settings-input"
-                                        placeholder="http://localhost:23236">
-                                </div>
-                                <div class="setting-row">
-                                    <label>保存目录</label>
-                                    <input type="text" id="netease-download-dir" placeholder="下载保存目录">
-                                </div>
+                <div id="view-settings" class="hidden">
+                    <div class="settings-page glass-panel">
+                        <h3><i class="fas fa-cog"></i> 系统设置</h3>
 
-                                <button id="netease-change-api" class="btn-danger-block">断开 API 连接</button>
-                                <div class="setting-actions">
-                                    <button id="netease-save-dir" class="btn-primary">保存设置</button>
-                                    <button id="netease-close-settings" class="btn-primary">关闭</button>
+                        <div class="settings-section">
+                            <h4>外观设置</h4>
+                            <div class="setting-row">
+                                <label>全局缩放 (当前: <span id="setting-scale-value">自动</span>)</label>
+                                <div style="display: flex; align-items: center; gap: 0.8rem;">
+                                    <i class="fas fa-text-height" style="font-size: 0.8rem; opacity: 0.6;"></i>
+                                    <input type="range" id="setting-scale-input" min="0.6" max="1.4" step="0.05"
+                                        style="flex:1;">
+                                    <i class="fas fa-text-height" style="font-size: 1.2rem; opacity: 0.9;"></i>
+                                    <button id="setting-scale-reset" class="btn-mini"
+                                        style="margin-left: 0.5rem;">重置</button>
                                 </div>
                             </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h4>网易云音乐配置</h4>
+                            <div class="setting-row">
+                                <label>API 地址</label>
+                                <input type="text" id="netease-api-settings-input" placeholder="http://localhost:23236">
+                            </div>
+                            <div class="setting-row">
+                                <label>保存目录</label>
+                                <input type="text" id="netease-download-dir" placeholder="下载保存目录">
+                            </div>
+                            <button id="netease-change-api" class="btn-danger-block">断开 API 连接</button>
+                        </div>
+
+                        <div class="settings-actions" style="margin-top: 2rem;">
+                            <button id="netease-save-dir" class="btn-primary">保存所有设置</button>
                         </div>
                     </div>
                 </div>
