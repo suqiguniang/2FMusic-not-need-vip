@@ -1510,6 +1510,33 @@ select:focus {
     transform: scale(0.95);
 }
 
+.btn-glass-danger {
+    background: rgba(255, 71, 87, 0.1);
+    color: #ff6b6b;
+    border: 1px solid rgba(255, 71, 87, 0.3);
+    padding: 0.7rem 1.5rem;
+    border-radius: 2rem;
+    cursor: pointer;
+    font-size: 0.95rem;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.btn-glass-danger:hover {
+    background: #ff4757;
+    border-color: #ff4757;
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 71, 87, 0.3);
+}
+
+.btn-glass-danger:active {
+    transform: scale(0.95);
+}
+
 .section-subtitle {
     font-size: 1.2rem;
     font-weight: bold;
@@ -3907,6 +3934,7 @@ select:focus {
 /* Make buttons in settings full width for better touch targets and visuals */
 .settings-section .btn-normal,
 .settings-section .btn-danger,
+.settings-section .btn-glass-danger,
 .settings-section .btn-primary,
 .settings-section .btn-danger-block {
     width: 100%;
