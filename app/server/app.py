@@ -1133,7 +1133,6 @@ def _format_netease_songs(source_tracks):
         privilege = item.get('privilege') or {}
         privilege_fee = privilege.get('fee')
         # 仅在明确 fee==1（VIP 曲目）时标记 VIP，避免 fee=8 的“会员高音质”误标
-        # 仅在明确 fee==1（VIP 曲目）时标记 VIP，避免 fee=8 的“会员高音质”误标
         is_vip = (fee == 1) or (privilege_fee == 1)
         user_level, max_level = _extract_song_level(privilege)
         artists = ' / '.join([a.get('name') for a in item.get('ar', []) if a.get('name')]) or '未知艺术家'
@@ -1450,37 +1449,44 @@ def delete_file(song_id):
             return jsonify({'success': False, 'error': '文件未找到'})
 
         # 2. 执行删除
-        # 安全保护：只有主音乐库内的文件才允许物理删除
-        # 挂载的外部文件仅移除数据库索引，不删源文件
-        is_managed_file = os.path.abspath(target_path).startswith(os.path.abspath(MUSIC_LIBRARY_PATH))
+        # 永久删除操作。不管是主音乐库还是外部添加目录都执行物理删除。
+        # 安全加固：仅允许删除特定后缀的文件，防止误删系统文件
+        ALLOWED_DELETE_EXTS = {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}
+        _, ext = os.path.splitext(target_path)
+        if ext.lower() not in ALLOWED_DELETE_EXTS:
+             return jsonify({'success': False, 'error': f'为了安全，禁止删除 {ext} 类型的文件'})
+
+        # 重试机制应对 Windows 文件锁
+        for i in range(10):
+            try:
+                os.remove(target_path)
+                break
+            except PermissionError:
+                if i < 9: time.sleep(0.2)
+                else: return jsonify({'success': False, 'error': '文件正被占用，无法删除'})
         
-        if is_managed_file:
-            # 重试机制应对 Windows 文件锁
-            for i in range(10):
-                try:
-                    os.remove(target_path)
-                    break
-                except PermissionError:
-                    if i < 9: time.sleep(0.2)
-                    else: return jsonify({'success': False, 'error': '文件正被占用，无法删除'})
+        # 清理同级关联资源 (封面/歌词/逐字歌词)
+        base = os.path.splitext(target_path)[0]
+        for ext in ['.lrc', '.yrc', '.jpg']:
+            try:
+                if os.path.exists(base + ext): os.remove(base + ext)
+            except: pass
             
-            # 清理同级关联资源 (封面/歌词)
-            base = os.path.splitext(target_path)[0]
-            for ext in ['.lrc', '.jpg']:
-                try:
-                    if os.path.exists(base + ext): os.remove(base + ext)
-                except: pass
-        else:
-            logger.info(f"外部文件仅移除索引: {target_path}")
-            
-        # 尝试清理主库下的 covers/lyrics (如果是主库文件)
+        # 尝试清理主库下的 covers/lyrics
         filename = os.path.basename(target_path)
         base_name = os.path.splitext(filename)[0]
-        for sub in ['lyrics', 'covers']:
-            ext = '.lrc' if sub == 'lyrics' else '.jpg'
-            sub_path = os.path.join(MUSIC_LIBRARY_PATH, sub, base_name + ext)
-            try: 
-                if os.path.exists(sub_path): os.remove(sub_path)
+        
+        # 清理封面
+        try:
+             cv_path = os.path.join(MUSIC_LIBRARY_PATH, 'covers', base_name + '.jpg')
+             if os.path.exists(cv_path): os.remove(cv_path)
+        except: pass
+
+        # 清理歌词 (.lrc / .yrc)
+        for lext in ['.lrc', '.yrc']:
+            try:
+                ly_path = os.path.join(MUSIC_LIBRARY_PATH, 'lyrics', base_name + lext)
+                if os.path.exists(ly_path): os.remove(ly_path)
             except: pass
         
         # 4. 数据库清理 (Watchdog 也会做，但双重保障)
