@@ -1,8 +1,11 @@
 appname               = 2fmusic-preview
-version               = 0.0.1
+version               = 0.0.2
 display_name          = 2FMusic Preview
 desc                  = """
 <p><b>2FMusic 预览扩展 (CGI版)</b></p>
+<p>Web端文件管理器双击预览播放拓展。</p>
+<p>依赖：2FMusic</p>
+<p style="color: #ff4d4d; font-weight: bold;">注意：此拓展会导致移动端APP音乐播放器失效！</p>
 """
 arch                  = x86_64
 maintainer            = yuexps

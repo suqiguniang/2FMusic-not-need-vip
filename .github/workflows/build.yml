@@ -1,10 +1,10 @@
-name: Auto Build 2FMusic (Dual Versions)
+name: Auto Build 2FMusic
 
 on:
   workflow_dispatch: # 允许手动触发
-  push:              # 允许代码推送触发
+  push:
     paths:
-      - 'manifest'   # 只有当 manifest 文件发生变动时才自动触发构建
+      - 'manifest'   # 只有当 manifest 版本号发生变动时才自动触发构建
 
 permissions:
   contents: write
@@ -24,9 +24,9 @@ jobs:
     - name: Check Version Change
       if: github.event_name == 'push'
       run: |
-        VER_NOW=$(grep "^version=" manifest | cut -d= -f2 | xargs)
-        # 获取上一 commit 的文件内容 (兼容首次 commit 情况)
-        VER_OLD=$(git show HEAD^:manifest 2>/dev/null | grep "^version=" | cut -d= -f2 | xargs || echo "")
+        VER_NOW=$(grep "^version" manifest | awk -F'=' '{print $2}' | xargs)
+        # 获取上一 commit 的文件内容 (HEAD^:manifest)
+        VER_OLD=$(git show HEAD^:manifest 2>/dev/null | grep "^version" | awk -F'=' '{print $2}' | xargs || echo "")
         
         echo "Current Version: $VER_NOW"
         echo "Previous Version: $VER_OLD"
@@ -170,7 +170,41 @@ jobs:
         echo "binary_pkg=${BINARY_FPK_NAME}" >> $GITHUB_OUTPUT
         echo "✅ Generated: $BINARY_FPK_NAME"
 
-    # 8. 删除旧的同版本 Release
+    # ===============================
+    # 8. 构建2FMusic Preview (CGI)
+    # ===============================
+    - name: Build Preview (CGI)
+      id: build_preview_cgi
+      run: |
+        echo "📦 Building Preview Extension (CGI)..."
+        cd extensions/preview-cgi
+        
+        # Compile C Code
+        echo "🔨 Compiling index.c..."
+        gcc -static -O2 -o app/ui/index.cgi app/ui/index.c
+        chmod +x app/ui/index.cgi
+        rm app/ui/index.c
+        
+        # Package
+        fnpack build
+        
+        # Get Version from Manifest
+        VERSION=$(grep "^version" manifest | awk -F'=' '{print $2}' | tr -d '[:space:]')
+        SHORT_SHA=$(git rev-parse --short HEAD)
+        PKG_NAME="2fmusic-preview-cgi-${VERSION}-${SHORT_SHA}.fpk"
+        
+        # Find and Move
+        if [ -f "2fmusic-preview.fpk" ]; then
+          mv 2fmusic-preview.fpk "../../$PKG_NAME"
+        else
+          mv *.fpk "../../$PKG_NAME" || echo "Warning: No fpk found!"
+        fi
+        
+        cd ../..
+        echo "pkg_name=${PKG_NAME}" >> $GITHUB_OUTPUT
+        echo "✅ Built: $PKG_NAME"
+
+    # 9. 删除旧的同版本 Release
     - name: Delete old Pre-release
       run: |
         TAG="v${{ steps.version.outputs.version }}-pre"
@@ -179,12 +213,12 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    # 9. 创建发布并上传两个文件
+    # 10. 创建发布并上传两个文件
     - name: Create Pre-release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: v${{ steps.version.outputs.version }}-pre
-        name: 2FMusic ${{ steps.version.outputs.version }} (Dual Versions)
+        name: 2FMusic ${{ steps.version.outputs.version }}
         body: |
           ## 🚀 自动构建的测试版
 
@@ -202,13 +236,20 @@ jobs:
           - **文件**: `${{ steps.build_source.outputs.source_pkg }}`
           - **依赖**: 依赖 Python 环境 (`python312`)。
           
-          ### 2. ⚡ 二进制版
+          ### 2. ⚡ 二进制版（推荐）
           - **文件**: `${{ steps.build_binary.outputs.binary_pkg }}`
           - **依赖**: **无需** Python 环境，开箱即用。
+
+          ### 3. 🗂️ 预览播放拓展（可选）
+          - **文件**: `${{ steps.build_preview_cgi.outputs.pkg_name }}`
+          - **说明**: Web端文件管理器双击预览播放拓展，注意：此拓展会导致移动端APP音乐播放器失效！
+
+          > ⚠️ **重要提示**：为避免兼容性问题，安装新版前建议**完全卸载旧版本并清除数据**！
 
         files: |
           ${{ steps.build_source.outputs.source_pkg }}
           ${{ steps.build_binary.outputs.binary_pkg }}
+          ${{ steps.build_preview_cgi.outputs.pkg_name }}
         prerelease: true
         make_latest: legacy
         draft: false
