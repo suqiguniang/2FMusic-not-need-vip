@@ -291,11 +291,9 @@ def login():
     next_path = request.args.get('next') or '/'
     if request.method == 'POST':
         pwd = request.form.get('password') or ''
-        
-        # Enforce SHA256 Hash check ONLY. Plaintext is no longer accepted.
+        # 兼容明文和SHA256哈希
         stored_hash = hashlib.sha256(APP_AUTH_PASSWORD.encode()).hexdigest()
-        
-        if pwd.lower() == stored_hash.lower():
+        if pwd == APP_AUTH_PASSWORD or pwd.lower() == stored_hash.lower():
             session['authed'] = True
             if request.form.get('remember'):
                 session.permanent = True
