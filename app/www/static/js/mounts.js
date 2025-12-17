@@ -141,6 +141,14 @@ export function trackMountProgress(onDone) {
 }
 
 export function initMounts(onRefreshSongs) {
+  const closeBtn = document.getElementById('close-upload-modal');
+  if (closeBtn) {
+    closeBtn.onclick = () => {
+      const modal = document.getElementById('upload-modal');
+      if (modal) modal.classList.remove('active');
+    };
+  }
+
   if (ui.btnAddMount) {
     ui.btnAddMount.addEventListener('click', () => {
       const path = ui.mountPathInput?.value.trim();
