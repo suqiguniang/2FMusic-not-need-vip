@@ -16,8 +16,85 @@ async function toggleFavorite(song, btnEl) {
     // 乐观 UI 更新
     state.favorites.delete(song.id);
     if (btnEl) { btnEl.classList.remove('active'); btnEl.innerHTML = '<i class="far fa-heart"></i>'; }
-    try { await api.favorites.remove(song.id); } catch (e) { console.error(e); }
+    try { 
+      if (state.selectedPlaylistId) {
+        // 如果在收藏夹详情页，只从当前收藏夹中移除
+        await api.favorites.remove(song.id, state.selectedPlaylistId);
+        
+        // 更新当前收藏夹的缓存
+        try {
+          const songsRes = await api.favoritePlaylists.getSongs(state.selectedPlaylistId);
+          if (songsRes.data) {
+            saveCachedPlaylistSongs(state.selectedPlaylistId, songsRes.data);
+          }
+        } catch (e) {
+          console.error(`更新收藏夹 ${state.selectedPlaylistId} 缓存失败:`, e);
+        }
+      } else {
+        // 如果在其他页面（如本地音乐），从所有收藏夹中移除
+        try {
+          // 获取所有收藏夹列表
+          const playlistsRes = await api.favoritePlaylists.list();
+          const playlistIds = playlistsRes.data ? playlistsRes.data.map(p => p.id) : [];
+          
+          // 确保包含默认收藏夹
+          if (!playlistIds.includes('default')) {
+            playlistIds.push('default');
+          }
+          
+          // 从每个收藏夹中移除歌曲
+          for (const playlistId of playlistIds) {
+            try {
+              await api.favorites.remove(song.id, playlistId);
+            } catch (e) {
+              // 如果从某个收藏夹移除失败，继续尝试其他收藏夹
+              console.error(`从收藏夹 ${playlistId} 移除歌曲失败:`, e);
+            }
+          }
+        } catch (e) {
+          // 如果获取收藏夹列表失败，至少从默认收藏夹中移除
+          console.error('获取收藏夹列表失败:', e);
+          await api.favorites.remove(song.id, 'default');
+        }
+      }
+    } catch (e) { console.error(e); }
     saveFavorites();
+
+    // 更新收藏夹缓存，确保下次访问收藏夹页面时能看到最新内容
+    if (!state.selectedPlaylistId) {
+      try {
+        // 获取所有收藏夹的最新歌曲列表并更新缓存
+        const playlistsRes = await api.favoritePlaylists.list();
+        const playlists = playlistsRes.data || [];
+        
+        // 更新每个收藏夹的歌曲列表缓存
+        for (const playlist of playlists) {
+          try {
+            const songsRes = await api.favoritePlaylists.getSongs(playlist.id);
+            if (songsRes.data) {
+              saveCachedPlaylistSongs(playlist.id, songsRes.data);
+            }
+          } catch (e) {
+            console.error(`获取收藏夹 ${playlist.id} 歌曲列表失败:`, e);
+          }
+        }
+        
+        // 处理默认收藏夹
+        try {
+          const defaultSongsRes = await api.favoritePlaylists.getSongs('default');
+          if (defaultSongsRes.data) {
+            saveCachedPlaylistSongs('default', defaultSongsRes.data);
+          }
+        } catch (e) {
+          console.error('获取默认收藏夹歌曲列表失败:', e);
+        }
+        
+        // 更新收藏夹列表缓存
+        saveCachedPlaylists(playlists);
+      } catch (e) {
+        console.error('更新收藏夹缓存失败:', e);
+      }
+    }
 
     const currentPlaying = state.playQueue[state.currentTrackIndex];
     if (currentPlaying && currentPlaying.id === song.id) {
@@ -599,13 +676,15 @@ function renderPlaylistDetails(playlistId) {
           api.favoritePlaylists.delete(playlistId)
             .then(res => {
               if (res.success) {
-                // 删除成功，清除收藏夹缓存，然后返回收藏主页
-                clearPlaylistCache();
-                // 同时清除本地缓存
+                // 删除成功，更新本地缓存（只移除被删除的收藏夹）
                 const updatedPlaylists = state.cachedPlaylists.filter(p => String(p.id) !== String(playlistId));
                 saveCachedPlaylists(updatedPlaylists);
-                delete state.cachedPlaylistSongs[playlistId];
-                saveCachedPlaylistSongs(playlistId, []);
+                
+                // 清除被删除收藏夹的歌曲缓存
+                if (state.cachedPlaylistSongs[playlistId]) {
+                  delete state.cachedPlaylistSongs[playlistId];
+                  localStorage.setItem('2fmusic_cached_playlist_songs', JSON.stringify(state.cachedPlaylistSongs));
+                }
                 
                 state.selectedPlaylistId = null;
                 renderPlaylist();
@@ -622,8 +701,8 @@ function renderPlaylistDetails(playlistId) {
       );
     });
     
-    // 如果有缓存的歌曲列表
-    if (cachedSongs.length > 0) {
+    // 如果有缓存的歌曲列表（包括空数组）
+    if (cachedSongs !== undefined && cachedSongs !== null) {
       // 从完整歌曲列表中找到对应的歌曲信息
       const filteredSongs = state.fullPlaylist.filter(song => 
         cachedSongs.includes(song.id)
@@ -1502,7 +1581,8 @@ export function bindUiControls() {
 
         // 1. Update Detail Button
         if (state.playQueue[state.currentTrackIndex]) {
-          updateDetailFavButton(state.favorites.has(state.playQueue[state.currentTrackIndex].filename));
+          const currentTrack = state.playQueue[state.currentTrackIndex];
+          updateDetailFavButton(state.favorites.has(currentTrack.id || currentTrack.filename));
         }
 
         // 2. Update Playlist UI if visible
@@ -1518,7 +1598,7 @@ export function bindUiControls() {
             // Note: dataset.index maps to state.displayPlaylist
             if (index >= 0 && state.displayPlaylist[index]) {
               const song = state.displayPlaylist[index];
-              if (state.favorites.has(song.filename)) {
+              if (state.favorites.has(song.id || song.filename)) {
                 btn.classList.add('active');
                 btn.innerHTML = '<i class="fas fa-heart"></i>';
               } else {

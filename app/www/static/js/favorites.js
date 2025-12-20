@@ -116,13 +116,25 @@ export function showPlaylistSelectDialog(song, btnEl) {
   img.crossOrigin = 'Anonymous';
   
   // 先获取收藏夹列表，然后再应用颜色并显示对话框
-  getPlaylistsWithCache().then(res => {
-    if (res && res.data) {
+  (async () => {
+    try {
+      let playlists = [];
+      // 优先使用本地缓存数据
+      if (state && state.cachedPlaylists) {
+        playlists = state.cachedPlaylists;
+      } else {
+        // 如果缓存中没有数据或数据为空，从API获取
+        const res = await api.favoritePlaylists.list();
+        if (res && res.data) {
+          playlists = res.data;
+        }
+      }
+      
       // 去重处理
       const uniquePlaylists = [];
       const seenIds = new Set();
       
-      res.data.forEach(playlist => {
+      playlists.forEach(playlist => {
         if (!seenIds.has(playlist.id)) {
           seenIds.add(playlist.id);
           uniquePlaylists.push(playlist);
@@ -135,13 +147,18 @@ export function showPlaylistSelectDialog(song, btnEl) {
       uniquePlaylists.forEach(playlist => {
         const item = document.createElement('div');
         item.className = 'playlist-item';
+        // 如果在收藏夹详情页，默认选中当前收藏夹，否则选中默认收藏夹
+        const isSelected = state.selectedPlaylistId ? String(playlist.id) === String(state.selectedPlaylistId) : playlist.is_default;
         item.innerHTML = `
-          <input type="radio" name="playlist" id="playlist-${playlist.id}" value="${playlist.id}" ${playlist.is_default ? 'checked' : ''}>
+          <input type="radio" name="playlist" id="playlist-${playlist.id}" value="${playlist.id}" ${isSelected ? 'checked' : ''}>
           <label for="playlist-${playlist.id}">${playlist.name}</label>
         `;
         container.appendChild(item);
       });
+    } catch (e) {
+      console.error('加载收藏夹列表失败:', e);
     }
+  })();
     
     // 列表加载完成后，开始加载封面图片并应用颜色
     img.onload = () => {
@@ -187,11 +204,9 @@ export function showPlaylistSelectDialog(song, btnEl) {
     };
     
     img.src = coverUrl;
-  }).catch(err => {
-    console.error('获取收藏夹列表失败:', err);
-    // 即使获取收藏夹列表失败，也要显示对话框（使用默认样式）
-    document.body.appendChild(dialog);
-  });
+  
+  // 即使获取收藏夹列表失败，也要显示对话框（使用默认样式）
+  // 对话框显示逻辑已经在上面的async函数和图片加载事件中处理
   
   // 确认按钮事件
   const confirmBtn = dialog.querySelector('#confirm-btn');
@@ -227,9 +242,6 @@ export async function addToSelectedPlaylist(song, playlistId, btnEl, dialog) {
   if (btnEl) { btnEl.classList.add('active'); btnEl.innerHTML = '<i class="fas fa-heart"></i>'; }
   try { 
     await api.favorites.add(song.id, playlistId); 
-    
-    // 清除旧的缓存
-    clearPlaylistCache();
     
     // 更新本地缓存：立即更新收藏夹歌曲列表，实现乐观UI
     // 1. 更新收藏夹列表中的歌曲数量
@@ -306,25 +318,45 @@ export function showCreatePlaylistDialog() {
     
     try {
       // 先获取所有收藏夹，检查名称是否已存在
-      const listRes = await getPlaylistsWithCache();
-      if (listRes && listRes.data) {
-        // 检查是否存在同名收藏夹
-        const existingPlaylist = listRes.data.find(playlist => playlist.name === name);
-        if (existingPlaylist) {
-          playlistNameInput.style.borderColor = '#ff4444';
-          showToast(`已存在名为"${name}"的收藏夹，请使用其他名称`, 'error');
-          return;
+      let playlists = [];
+      if (state && state.cachedPlaylists) {
+        playlists = state.cachedPlaylists;
+      } else {
+        // 如果缓存中没有，则通过API获取
+        const listRes = await api.favoritePlaylists.list();
+        if (listRes && listRes.success && listRes.data) {
+          playlists = listRes.data;
         }
+      }
+      
+      // 检查是否存在同名收藏夹
+      const existingPlaylist = playlists.find(playlist => playlist.name === name);
+      if (existingPlaylist) {
+        playlistNameInput.style.borderColor = '#ff4444';
+        showToast(`已存在名为"${name}"的收藏夹，请使用其他名称`, 'error');
+        return;
       }
       
       // 创建收藏夹
       const res = await api.favoritePlaylists.create(name);
       if (res.success) {
-        // 清除缓存以获取最新数据
-        clearPlaylistCache();
-        
-        // 创建成功后刷新收藏夹页面
+        // 创建成功后，将新收藏夹添加到缓存中
         console.log('收藏夹创建成功:', res.data);
+        
+        // 更新缓存：添加新创建的收藏夹
+        if (res.data) {
+          const updatedPlaylists = [...(state.cachedPlaylists || []), res.data];
+          saveCachedPlaylists(updatedPlaylists);
+          
+          // 初始化新收藏夹的歌曲缓存为空数组
+          if (!state.cachedPlaylistSongs) {
+            state.cachedPlaylistSongs = {};
+          }
+          state.cachedPlaylistSongs[res.data.id] = [];
+          localStorage.setItem('2fmusic_cached_playlist_songs', JSON.stringify(state.cachedPlaylistSongs));
+        }
+        
+        // 刷新收藏夹页面
         renderPlaylist();
         showToast('收藏夹创建成功', 'success');
         dialog.remove();
