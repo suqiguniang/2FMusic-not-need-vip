@@ -1,7 +1,7 @@
 import { state, saveFavorites, saveCachedPlaylists, saveCachedPlaylistSongs } from './state.js';
 import { ui } from './ui.js';
 import { api } from './api.js';
-import { showToast, updateDetailFavButton, extractColorFromImage } from './utils.js';
+import { showToast, updateDetailFavButton } from './utils.js';
 import { renderPlaylist } from './player.js';
 
 // 旧的缓存机制已替换为state.js中的持久化缓存
@@ -43,11 +43,20 @@ export async function loadPlaylistFilter() {
         }
       });
       
+      // 对收藏夹进行排序：默认收藏夹排第一位，其他按名称排序
+      const sortedPlaylists = uniquePlaylists.sort((a, b) => {
+        // 默认收藏夹排第一位
+        if (a.name === '默认收藏夹' && b.name !== '默认收藏夹') return -1;
+        if (a.name !== '默认收藏夹' && b.name === '默认收藏夹') return 1;
+        // 其他收藏夹按名称排序
+        return a.name.localeCompare(b.name);
+      });
+      
       // 清空现有选项，保留"所有收藏夹"
       ui.playlistFilter.innerHTML = '<option value="">所有收藏夹</option>';
       
       // 添加收藏夹选项
-      uniquePlaylists.forEach(playlist => {
+      sortedPlaylists.forEach(playlist => {
         const option = document.createElement('option');
         option.value = playlist.id;
         option.textContent = playlist.name;
@@ -81,18 +90,6 @@ export async function loadPlaylistSongs(playlistId) {
 
 // 显示收藏夹选择对话框
 export function showPlaylistSelectDialog(song, btnEl) {
-  // 辅助函数：加深颜色
-  function darkenColor(color, amount = 0.3) {
-    return {
-      r: Math.max(0, Math.floor(color.r * (1 - amount))),
-      g: Math.max(0, Math.floor(color.g * (1 - amount))),
-      b: Math.max(0, Math.floor(color.b * (1 - amount))),
-      toString: function() {
-        return `rgba(${this.r}, ${this.g}, ${this.b}, 0.9)`;
-      }
-    };
-  }
-  
   // 创建独立的收藏夹选择对话框
   const dialog = document.createElement('div');
   dialog.className = 'playlist-select-dialog';
@@ -110,12 +107,11 @@ export function showPlaylistSelectDialog(song, btnEl) {
     </div>
   `;
   
-  // 自动从歌曲封面提取颜色并应用到对话框背景
-  const coverUrl = song.cover || '/static/images/ICON_256.PNG';
-  const img = new Image();
-  img.crossOrigin = 'Anonymous';
+  // 使用CSS定义的样式，不再设置内联样式
+  const dialogContent = dialog.querySelector('.dialog-content');
+  const confirmBtn = dialog.querySelector('#confirm-btn');
   
-  // 先获取收藏夹列表，然后再应用颜色并显示对话框
+  // 获取收藏夹列表
   (async () => {
     try {
       let playlists = [];
@@ -159,57 +155,14 @@ export function showPlaylistSelectDialog(song, btnEl) {
       console.error('加载收藏夹列表失败:', e);
     }
   })();
-    
-    // 列表加载完成后，开始加载封面图片并应用颜色
-    img.onload = () => {
-      try {
-        // 尝试从封面图片提取主题色
-        const color = extractColorFromImage(img);
-        if (color) {
-          // 应用提取的颜色到对话框内容区域背景
-          const dialogContent = dialog.querySelector('.dialog-content');
-          dialogContent.style.background = `rgba(${color.r}, ${color.g}, ${color.b}, 0.9)`;
-          
-          // 根据提取的颜色亮度调整文字颜色，确保可读性
-          const brightness = (color.r * 299 + color.g * 587 + color.b * 114) / 1000;
-          const textColor = brightness > 128 ? '#000' : '#fff';
-          dialogContent.style.color = textColor;
-          
-          // 调整确认按钮颜色：使用提取颜色的加深版本，增加对比度
-          const confirmBtn = dialog.querySelector('#confirm-btn');
-          if (confirmBtn) {
-            const darkColor = darkenColor(color, 0.4); // 加深40%，提高对比度
-            confirmBtn.style.background = darkColor.toString();
-            confirmBtn.style.color = textColor;
-            confirmBtn.style.border = `1px solid rgba(${darkColor.r}, ${darkColor.g}, ${darkColor.b}, 0.5)`;
-            confirmBtn.style.boxShadow = `0 2px 10px rgba(${darkColor.r}, ${darkColor.g}, ${darkColor.b}, 0.3)`;
-            confirmBtn.style.fontWeight = '600';
-          }
-        }
-      } catch (e) {
-        console.error('提取颜色失败:', e);
-      } finally {
-        // 无论颜色提取是否成功，都显示对话框
-        document.body.appendChild(dialog);
-        // 清理临时图片
-        img.remove();
-      }
-    };
-    
-    img.onerror = () => {
-      console.error('加载封面图片失败');
-      // 图片加载失败也显示对话框
-      document.body.appendChild(dialog);
-      img.remove();
-    };
-    
-    img.src = coverUrl;
+  
+  // 直接显示对话框
+  document.body.appendChild(dialog);
   
   // 即使获取收藏夹列表失败，也要显示对话框（使用默认样式）
   // 对话框显示逻辑已经在上面的async函数和图片加载事件中处理
   
   // 确认按钮事件
-  const confirmBtn = dialog.querySelector('#confirm-btn');
   const closeBtn = dialog.querySelector('#close-btn');
   
   const confirmHandler = () => {
@@ -396,7 +349,7 @@ export function showCreatePlaylistDialog() {
 
   const dialogContent = dialog.querySelector('.dialog-content');
   
-  // 设置平衡的背景透明度和流体效果
+  // 设置平衡的背景透明度
   dialogContent.style.backgroundColor = 'rgba(35, 35, 35, 0.9)';
   dialogContent.style.border = '1px solid rgba(255, 255, 255, 0.15)';
   dialogContent.style.backdropFilter = 'blur(10px)';

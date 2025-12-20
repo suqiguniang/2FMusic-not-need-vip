@@ -447,8 +447,17 @@ function renderFavoritesHome() {
   if (state.cachedPlaylists.length > 0) {
     const frag = document.createDocumentFragment();
     
+    // 对收藏夹进行排序：默认收藏夹排第一位，其他按名称排序
+    const sortedPlaylists = [...state.cachedPlaylists].sort((a, b) => {
+      // 默认收藏夹排第一位
+      if (a.name === '默认收藏夹' && b.name !== '默认收藏夹') return -1;
+      if (a.name !== '默认收藏夹' && b.name === '默认收藏夹') return 1;
+      // 其他收藏夹按名称排序
+      return a.name.localeCompare(b.name);
+    });
+    
     // 并行创建所有收藏夹卡片
-    const playlistPromises = state.cachedPlaylists.map(async (playlist) => {
+    const playlistPromises = sortedPlaylists.map(async (playlist) => {
       // 创建收藏夹文件夹卡片
       const folderCard = document.createElement('div');
       folderCard.className = 'folder-card';
@@ -536,8 +545,17 @@ function renderFavoritesHome() {
         }
       });
       
+      // 对收藏夹进行排序：默认收藏夹排第一位，其他按名称排序
+      const sortedPlaylists = uniquePlaylists.sort((a, b) => {
+        // 默认收藏夹排第一位
+        if (a.name === '默认收藏夹' && b.name !== '默认收藏夹') return -1;
+        if (a.name !== '默认收藏夹' && b.name === '默认收藏夹') return 1;
+        // 其他收藏夹按名称排序
+        return a.name.localeCompare(b.name);
+      });
+      
       // 更新缓存
-      saveCachedPlaylists(uniquePlaylists);
+      saveCachedPlaylists(sortedPlaylists);
       
       // 如果缓存数据与当前显示的数据不同，重新渲染
       if (JSON.stringify(uniquePlaylists) !== JSON.stringify(state.cachedPlaylists)) {

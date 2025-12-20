@@ -1405,13 +1405,13 @@ input[type=range]::-webkit-slider-thumb {
 .confirm-box {
     width: 85%;
     max-width: 320px;
-    background: rgba(30, 30, 30, 0.95);
+    background: rgba(30, 30, 30, 0.9);
     padding: 1.5rem;
     border-radius: 1rem;
     text-align: center;
     transform: scale(0.9);
     transition: transform 0.2s;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
 
 .custom-overlay.active .confirm-box {
@@ -1419,7 +1419,7 @@ input[type=range]::-webkit-slider-thumb {
 }
 
 .confirm-box h3 {
-    color: #ff4757;
+    color: rgba(108, 92, 231, 0.9);
     margin-bottom: 0.8rem;
 }
 
@@ -3124,8 +3124,8 @@ select:focus {
     bottom: -20%;
     background: 
         radial-gradient(circle at 30% 30%, rgba(108, 92, 231, 0.2), transparent 40%),
-        radial-gradient(circle at 70% 70%, rgba(253, 186, 116, 0.2), transparent 40%),
-        radial-gradient(circle at 50% 100%, rgba(6, 182, 212, 0.2), transparent 40%);
+        radial-gradient(circle at 70% 70%, rgba(162, 155, 254, 0.2), transparent 40%),
+        radial-gradient(circle at 50% 100%, rgba(108, 92, 231, 0.1), transparent 40%);
     animation: fluidFlow 15s ease infinite alternate;
     z-index: -1;
     pointer-events: none;
@@ -3198,15 +3198,15 @@ select:focus {
 }
 
 .confirm-box .btn-danger {
-    background: linear-gradient(135deg, #ff7675, #d63031);
+    background: linear-gradient(135deg, rgba(108, 92, 231, 0.9), rgba(162, 155, 254, 0.9));
     color: white;
     border: none;
-    box-shadow: 0 4px 15px rgba(214, 48, 49, 0.3);
+    box-shadow: 0 4px 15px rgba(108, 92, 231, 0.2);
 }
 
 .btn-danger-block {
     width: 100%;
-    background: linear-gradient(135deg, #ff6b6b, #d63031);
+    background: linear-gradient(135deg, rgba(108, 92, 231, 0.9), rgba(162, 155, 254, 0.9));
     color: white;
     border: none;
     border-radius: 0.8rem;
@@ -3215,19 +3215,19 @@ select:focus {
     font-weight: 600;
     margin-top: 0.3rem;
     margin-bottom: 0.8rem;
-    box-shadow: 0 6px 14px rgba(214, 48, 49, 0.25);
+    box-shadow: 0 6px 14px rgba(108, 92, 231, 0.2);
     cursor: pointer;
     transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .btn-danger-block:hover {
     transform: translateY(-1px);
-    box-shadow: 0 10px 18px rgba(214, 48, 49, 0.3);
+    box-shadow: 0 10px 18px rgba(108, 92, 231, 0.3);
 }
 
 .btn-danger-block:active {
     transform: translateY(0);
-    box-shadow: 0 6px 14px rgba(214, 48, 49, 0.25);
+    box-shadow: 0 6px 14px rgba(108, 92, 231, 0.25);
 }
 
 
@@ -3946,7 +3946,7 @@ select:focus {
 }
 
 .btn-danger {
-    background: linear-gradient(135deg, #ff7675 0%, #d63031 100%);
+    background: linear-gradient(135deg, var(--primary) 0%, rgba(162, 155, 254, 0.9) 100%);
     color: white;
     border: none;
     padding: 0.7rem 1.5rem;
@@ -3954,7 +3954,7 @@ select:focus {
     font-weight: bold;
     cursor: pointer;
     transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-    box-shadow: 0 4px 15px rgba(214, 48, 49, 0.3);
+    box-shadow: 0 4px 15px rgba(108, 92, 231, 0.2);
     letter-spacing: 0.5px;
     display: inline-flex;
     align-items: center;
@@ -3964,7 +3964,7 @@ select:focus {
 
 .btn-danger:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 25px rgba(214, 48, 49, 0.5);
+    box-shadow: 0 8px 25px rgba(108, 92, 231, 0.3);
     filter: brightness(1.1);
 }
 
@@ -3977,16 +3977,19 @@ select:focus {
     width: 100%;
     padding: 0.8rem;
     margin-top: 1rem;
-    background: rgba(220, 53, 69, 0.2);
-    border: 1px solid rgba(220, 53, 69, 0.3);
-    color: #ff6b6b;
-    border-radius: 0.5rem;
+    background: linear-gradient(135deg, var(--primary), rgba(162, 155, 254, 0.9));
+    border: none;
+    color: white;
+    border-radius: 0.8rem;
+    font-weight: 600;
     cursor: pointer;
-    transition: 0.2s;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: 0 6px 14px rgba(108, 92, 231, 0.2);
 }
 
 .btn-danger-block:hover {
-    background: rgba(220, 53, 69, 0.8);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 18px rgba(108, 92, 231, 0.3);
     color: white;
 }
 

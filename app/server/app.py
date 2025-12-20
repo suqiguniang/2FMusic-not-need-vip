@@ -1805,18 +1805,19 @@ def remove_favorite():
         logger.error(f"取消收藏失败: {e}")
         return jsonify({'success': False, 'error': "移除失败"})
 
-# 兼容旧版API，获取所有收藏歌曲
+# 兼容旧版API，获取所有收藏歌曲（来自所有收藏夹）
 @app.route('/api/favorites', methods=['GET'])
 def get_favorites():
-    logger.info("API请求: 兼容旧版 - 获取默认收藏夹歌曲")
+    logger.info("API请求: 获取所有收藏夹歌曲")
     try:
         with get_db() as conn:
-            rows = conn.execute("SELECT song_id FROM favorites WHERE playlist_id='default'").fetchall()
+            # 获取所有收藏夹中的歌曲ID（去重）
+            rows = conn.execute("SELECT DISTINCT song_id FROM favorites").fetchall()
             song_ids = [r['song_id'] for r in rows]
-            logger.info(f"获取默认收藏夹歌曲成功，共 {len(song_ids)} 首歌曲")
+            logger.info(f"获取所有收藏夹歌曲成功，共 {len(song_ids)} 首歌曲")
             return jsonify({'success': True, 'data': song_ids})
     except Exception as e:
-        logger.error(f"获取默认收藏夹歌曲失败: {e}")
+        logger.error(f"获取所有收藏夹歌曲失败: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/netease/search')
