@@ -156,6 +156,7 @@ export function showPlaylistSelectDialog(song, btnEl) {
     // 列表加载完成后，开始加载封面图片并应用颜色
     img.onload = () => {
       try {
+        // 尝试从封面图片提取主题色
         const color = extractColorFromImage(img);
         if (color) {
           // 应用提取的颜色到对话框内容区域背景
@@ -196,6 +197,10 @@ export function showPlaylistSelectDialog(song, btnEl) {
     };
     
     img.src = coverUrl;
+  }).catch(err => {
+    console.error('获取收藏夹列表失败:', err);
+    // 即使获取收藏夹列表失败，也要显示对话框（使用默认样式）
+    document.body.appendChild(dialog);
   });
   
   // 确认按钮事件

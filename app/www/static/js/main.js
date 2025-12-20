@@ -105,15 +105,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       xhr.send(formData);
     };
 
-    uploadChooseBtn?.addEventListener('click', () => ui.fileUpload.click());
-    ui.fileUpload.addEventListener('change', () => handleFile(ui.fileUpload.files[0]));
-    uploadDropzone?.addEventListener('dragover', (e) => { e.preventDefault(); uploadDropzone.classList.add('dragging'); });
-    uploadDropzone?.addEventListener('dragleave', () => uploadDropzone.classList.remove('dragging'));
-    uploadDropzone?.addEventListener('drop', (e) => {
-      e.preventDefault();
-      uploadDropzone.classList.remove('dragging');
-      const file = e.dataTransfer.files[0];
-      handleFile(file);
+    uploadChooseBtn?.addEventListener('click', () => ui.fileUpload?.click());
+    uploadDropzone?.addEventListener('dragover', (e) => { e.preventDefault(); uploadDropzone?.classList.add('drag-over'); });
+    uploadDropzone?.addEventListener('dragleave', () => uploadDropzone?.classList.remove('drag-over'));
+    uploadDropzone?.addEventListener('drop', (e) => { 
+      e.preventDefault(); 
+      uploadDropzone?.classList.remove('drag-over'); 
+      if (e.dataTransfer?.files?.[0]) handleFile(e.dataTransfer.files[0]); 
+    });
+    ui.fileUpload?.addEventListener('change', (e) => { 
+      if (e.target?.files?.[0]) handleFile(e.target.files[0]); 
     });
 
     // 自定义下拉选择行为
@@ -236,7 +237,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 初始化模块
   initMounts(loadSongs);
-  await initPlayer();   // 优先初始化播放器，确保缓存秒开
+  
+  try {
+    await initPlayer();
+    console.log('[Main] Player initialized');
+  } catch (e) {
+    console.error('[Main] Failed to initialize player:', e);
+  }
+
+  // 检查是否需要特别处理收藏夹详情页
+  if (state.currentTab === 'fav' && state.selectedPlaylistId) {
+    // 如果在收藏夹详情页，延迟一点时间再渲染，确保DOM完全加载
+    setTimeout(() => {
+      renderPlaylist();
+    }, 100);
+  }
+
   await initNetease(loadSongs);
   loadMountPoints();
   startScanPolling(false, (r) => loadSongs(r, false), loadMountPoints);

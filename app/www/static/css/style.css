@@ -451,6 +451,28 @@ body::before {
     #view-mount .section-title {
         display: none !important;
     }
+    
+    /* Fix for mobile search box layout */
+    .content-header {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        padding: 0.8rem 0;
+    }
+    
+    .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        width: 100%;
+        justify-content: flex-end;
+    }
+    
+    .search-box {
+        flex: 1;
+        width: 100%;
+        margin-left: 0;
+    }
 
     /* NetEase: Hide text but KEEP buttons */
     #netease-content .section-title span {

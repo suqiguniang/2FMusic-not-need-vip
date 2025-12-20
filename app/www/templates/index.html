@@ -522,11 +522,24 @@
 
                         // If Tab is Favorite, filter it
                         if (tab === 'fav') {
-                            // 触发收藏夹卡片的渲染
-                            state.currentTab = 'fav';
-                            renderPlaylist();
-                            const titleEl = document.getElementById('list-title');
-                            if (titleEl) titleEl.innerText = '收藏列表';
+                            // 检查是否在收藏夹详情页
+                            const selectedPlaylistId = state.selectedPlaylistId;
+                            if (selectedPlaylistId) {
+                                // 在快速初始化阶段，我们只设置基本状态，不进行详细渲染
+                                // 真正的详细渲染将在main.js中通过renderPlaylist完成
+                                state.currentTab = 'fav';
+                                const titleEl = document.getElementById('list-title');
+                                if (titleEl) {
+                                    // 查找对应收藏夹名称
+                                    const playlists = JSON.parse(localStorage.getItem('2fmusic_playlists') || '[]');
+                                    const currentPlaylist = playlists.find(p => p.id === selectedPlaylistId);
+                                    titleEl.innerText = currentPlaylist ? currentPlaylist.name : '收藏夹详情';
+                                }
+                            } else {
+                                state.currentTab = 'fav';
+                                const titleEl = document.getElementById('list-title');
+                                if (titleEl) titleEl.innerText = '收藏列表';
+                            }
                             return; // 提前返回，避免执行下面的通用渲染逻辑
                         } else {
                             const titleEl = document.getElementById('list-title');
