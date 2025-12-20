@@ -498,7 +498,7 @@ export function renderPlaylist() {
 }
 
 // 渲染收藏主页：显示收藏夹文件夹
-function renderFavoritesHome() {
+export async function renderFavoritesHome() {
   // 只有在真正的收藏夹主页（没有选中的收藏夹）时才设置标题
   if (!state.selectedPlaylistId) {
     // 恢复列表标题为"我的收藏列表"
@@ -536,12 +536,53 @@ function renderFavoritesHome() {
   // 为收藏夹页面设置合适的网格布局
   ui.songContainer.className = 'song-list favorites-grid';
   
-  // 1. 优先使用本地缓存数据渲染
-  if (state.cachedPlaylists.length > 0) {
+  // 1. 优先使用本地缓存数据渲染，缓存为空时从服务器获取
+  let cachedPlaylists = state.cachedPlaylists || [];
+  
+  // 如果缓存中没有数据，直接从服务器获取
+  if (cachedPlaylists.length === 0) {
+    try {
+      // 同步从服务器获取数据
+      const res = await api.favoritePlaylists.list();
+      
+      if (res && res.data) {
+        // 去重处理
+        const uniquePlaylists = [];
+        const seenIds = new Set();
+        
+        res.data.forEach(playlist => {
+          if (!seenIds.has(playlist.id)) {
+            seenIds.add(playlist.id);
+            uniquePlaylists.push(playlist);
+          }
+        });
+        
+        // 对收藏夹进行排序：默认收藏夹排第一位，其他按名称排序
+        const sortedPlaylists = uniquePlaylists.sort((a, b) => {
+          // 默认收藏夹排第一位
+          if (a.name === '默认收藏夹' && b.name !== '默认收藏夹') return -1;
+          if (a.name !== '默认收藏夹' && b.name === '默认收藏夹') return 1;
+          // 其他收藏夹按名称排序
+          return a.name.localeCompare(b.name);
+        });
+        
+        // 更新缓存
+        saveCachedPlaylists(sortedPlaylists);
+        cachedPlaylists = sortedPlaylists;
+      }
+    } catch (err) {
+      console.error('加载收藏夹列表失败:', err);
+      // 如果缓存中没有数据且加载失败，显示错误信息
+      ui.songContainer.innerHTML = '<div class="loading-text" style="grid-column: 1/-1; padding: 4rem 0; font-size: 1.1rem; opacity: 0.6;">加载收藏夹失败</div>';
+      return;
+    }
+  }
+  
+  if (cachedPlaylists.length > 0) {
     const frag = document.createDocumentFragment();
     
     // 对收藏夹进行排序：默认收藏夹排第一位，其他按名称排序
-    const sortedPlaylists = [...state.cachedPlaylists].sort((a, b) => {
+    const sortedPlaylists = [...cachedPlaylists].sort((a, b) => {
       // 默认收藏夹排第一位
       if (a.name === '默认收藏夹' && b.name !== '默认收藏夹') return -1;
       if (a.name !== '默认收藏夹' && b.name === '默认收藏夹') return 1;
@@ -620,12 +661,12 @@ function renderFavoritesHome() {
       ui.songContainer.appendChild(frag);
     });
   } else {
-    // 缓存中没有数据，显示加载状态
-    ui.songContainer.innerHTML = '<div class="loading-text" style="grid-column: 1/-1; padding: 4rem 0; font-size: 1.1rem; opacity: 0.6;">加载中...</div>';
+    // 没有收藏夹数据
+    ui.songContainer.innerHTML = '<div class="loading-text" style="grid-column: 1/-1; padding: 4rem 0; font-size: 1.1rem; opacity: 0.6;">暂无收藏夹</div>';
   }
   
   // 2. 后台静默获取最新数据并更新
-  return api.favoritePlaylists.list().then(async res => {
+  api.favoritePlaylists.list().then(async res => {
     if (res && res.data) {
       // 去重处理
       const uniquePlaylists = [];
@@ -657,11 +698,8 @@ function renderFavoritesHome() {
       }
     }
   }).catch(err => {
-    console.error('加载收藏夹列表失败:', err);
-    // 如果缓存中没有数据且加载失败，显示错误信息
-    if (state.cachedPlaylists.length === 0) {
-      ui.songContainer.innerHTML = '<div class="loading-text" style="grid-column: 1/-1; padding: 4rem 0; font-size: 1.1rem; opacity: 0.6;">加载收藏夹失败</div>';
-    }
+    console.error('后台更新收藏夹列表失败:', err);
+    // 后台更新失败不影响用户当前使用
   });
 }
 
