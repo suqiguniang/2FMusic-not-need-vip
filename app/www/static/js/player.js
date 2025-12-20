@@ -382,36 +382,38 @@ export function renderPlaylist() {
     let filteredSongs;
     filteredSongs = [...state.fullPlaylist];
     
-    // 应用排序
-    filteredSongs.sort((a, b) => {
-      let valueA, valueB;
-      
-      switch (state.currentSort) {
-        case 'title':
-          valueA = (a.title || '').toLowerCase();
-          valueB = (b.title || '').toLowerCase();
-          break;
-        case 'artist':
-          valueA = (a.artist || '').toLowerCase();
-          valueB = (b.artist || '').toLowerCase();
-          break;
-        case 'album':
-          valueA = (a.album || '').toLowerCase();
-          valueB = (b.album || '').toLowerCase();
-          break;
-        case 'mtime':
-          valueA = a.mtime || 0;
-          valueB = b.mtime || 0;
-          break;
-        default:
-          valueA = (a.title || '').toLowerCase();
-          valueB = (b.title || '').toLowerCase();
-      }
-      
-      if (valueA < valueB) return state.sortOrder === 'asc' ? -1 : 1;
-      if (valueA > valueB) return state.sortOrder === 'asc' ? 1 : -1;
-      return 0;
-    });
+    // 应用排序：只在本地音乐页面使用
+    if (state.currentTab === 'local') {
+      filteredSongs.sort((a, b) => {
+        let valueA, valueB;
+        
+        switch (state.currentSort) {
+          case 'title':
+            valueA = (a.title || '').toLowerCase();
+            valueB = (b.title || '').toLowerCase();
+            break;
+          case 'artist':
+            valueA = (a.artist || '').toLowerCase();
+            valueB = (b.artist || '').toLowerCase();
+            break;
+          case 'album':
+            valueA = (a.album || '').toLowerCase();
+            valueB = (b.album || '').toLowerCase();
+            break;
+          case 'mtime':
+            valueA = a.mtime || 0;
+            valueB = b.mtime || 0;
+            break;
+          default:
+            valueA = (a.title || '').toLowerCase();
+            valueB = (b.title || '').toLowerCase();
+        }
+        
+        if (valueA < valueB) return state.sortOrder === 'asc' ? -1 : 1;
+        if (valueA > valueB) return state.sortOrder === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
     
     state.displayPlaylist = filteredSongs;
     
@@ -497,16 +499,19 @@ export function renderPlaylist() {
 
 // 渲染收藏主页：显示收藏夹文件夹
 function renderFavoritesHome() {
-  // 恢复列表标题为"我的收藏列表"
-  const listTitle = document.getElementById('list-title');
-  if (listTitle) {
-    listTitle.textContent = '收藏列表';
-  }
-  
-  // 恢复移动端顶栏标题为"我的收藏"
-  const mobilePageTitle = document.getElementById('mobile-page-title');
-  if (mobilePageTitle) {
-    mobilePageTitle.textContent = '我的收藏';
+  // 只有在真正的收藏夹主页（没有选中的收藏夹）时才设置标题
+  if (!state.selectedPlaylistId) {
+    // 恢复列表标题为"我的收藏列表"
+    const listTitle = document.getElementById('list-title');
+    if (listTitle) {
+      listTitle.textContent = '收藏列表';
+    }
+    
+    // 恢复移动端顶栏标题为"我的收藏"
+    const mobilePageTitle = document.getElementById('mobile-page-title');
+    if (mobilePageTitle) {
+      mobilePageTitle.textContent = '我的收藏';
+    }
   }
   
   // 总是移除可能已存在的返回按钮和菜单按钮（这些按钮只在收藏夹详情页显示）
@@ -710,15 +715,24 @@ function renderPlaylistDetails(playlistId) {
       // 在移动端，将返回按钮添加到顶栏右侧
       backBtn.innerHTML = `<i class="fas fa-arrow-left"></i>`;
       backBtn.style.fontSize = '1.5rem';
-      backBtn.style.background = 'none';
-      backBtn.style.border = 'none';
-      backBtn.style.color = 'white';
-      backBtn.style.padding = '0.5rem';
+      backBtn.style.background = 'rgba(255, 255, 255, 0.05)';
+      backBtn.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+      backBtn.style.color = 'rgba(255, 255, 255, 0.6)';
+      backBtn.style.padding = '0.5rem 0.7rem';
+      backBtn.style.borderRadius = '2rem';
       backBtn.style.cursor = 'pointer';
       backBtn.style.position = 'absolute';
       backBtn.style.right = '1rem';
       backBtn.style.top = '50%';
       backBtn.style.transform = 'translateY(-50%)';
+      backBtn.style.transition = 'all 0.3s ease';
+      // 添加悬停效果
+      backBtn.addEventListener('mouseenter', function() {
+        this.style.color = 'rgba(255, 255, 255, 0.8)';
+      });
+      backBtn.addEventListener('mouseleave', function() {
+        this.style.color = 'rgba(255, 255, 255, 0.6)';
+      });
       
       // 找到顶栏
       const topBar = document.querySelector('.top-bar');
@@ -1035,6 +1049,18 @@ export function switchTab(tab) {
       ui.searchInput.parentElement.style.display = 'none';
       ui.searchInput.parentElement.style.opacity = '0';
       ui.searchInput.value = ''; // Clear search
+    }
+  }
+
+  // Sort Controls Visibility: Only for Local Music
+  const sortControls = document.querySelector('.sort-controls');
+  if (sortControls) {
+    if (tab === 'local') {
+      sortControls.style.display = 'flex';
+      sortControls.style.opacity = '1';
+    } else {
+      sortControls.style.display = 'none';
+      sortControls.style.opacity = '0';
     }
   }
 

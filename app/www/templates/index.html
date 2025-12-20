@@ -645,18 +645,33 @@
                         // If Tab is Favorite, filter it
                         if (tab === 'fav') {
                             // 检查是否在收藏夹详情页
-                            const selectedPlaylistId = state.selectedPlaylistId;
+                            // 直接从localStorage获取，避免state.js未加载完成的问题
+                            const savedState = JSON.parse(localStorage.getItem('2fmusic_state') || '{}');
+                            const selectedPlaylistId = savedState.selectedPlaylistId;
                             if (selectedPlaylistId) {
                                 // 在快速初始化阶段，我们设置基本状态并添加必要的UI元素
                                 state.currentTab = 'fav';
                                 const titleEl = document.getElementById('list-title');
                                 const contentHeader = document.querySelector('.content-header');
                                 
+                                // 立即更新收藏夹标题，避免显示默认文本
                                 if (titleEl) {
                                     // 查找对应收藏夹名称
-                                    const playlists = JSON.parse(localStorage.getItem('2fmusic_playlists') || '[]');
-                                    const currentPlaylist = playlists.find(p => p.id === selectedPlaylistId);
+                                    const playlists = JSON.parse(localStorage.getItem('2fmusic_cached_playlists') || '[]');
+                                    const currentPlaylist = playlists.find(p => String(p.id) === String(selectedPlaylistId));
                                     titleEl.innerText = currentPlaylist ? currentPlaylist.name : '收藏夹详情';
+                                }
+                                
+                                // 立即隐藏添加收藏夹按钮：在收藏夹详情页隐藏
+                                const playlistFilterContainer = document.getElementById('playlist-filter-container');
+                                if (playlistFilterContainer) {
+                                    playlistFilterContainer.classList.add('hidden');
+                                }
+                                
+                                // 立即隐藏排序按钮：在收藏夹详情页隐藏排序功能
+                                const sortControls = document.querySelector('.sort-controls');
+                                if (sortControls) {
+                                    sortControls.classList.add('hidden');
                                 }
                                 
                                 // 添加返回按钮
@@ -674,12 +689,6 @@
                                             contentHeader.insertBefore(backBtn, sectionTitle);
                                         }
                                     }
-                                }
-                                
-                                // 隐藏添加收藏夹按钮
-                                const playlistFilterContainer = document.getElementById('playlist-filter-container');
-                                if (playlistFilterContainer) {
-                                    playlistFilterContainer.classList.add('hidden');
                                 }
                             } else {
                                 state.currentTab = 'fav';
