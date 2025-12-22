@@ -1120,6 +1120,11 @@ export function switchTab(tab) {
     }
   }
 
+  // Clear NetEase Search Input when leaving NetEase tab
+  if (tab !== 'netease' && ui.neteaseKeywordsInput) {
+    ui.neteaseKeywordsInput.value = '';
+  }
+
   // Sort Controls Visibility: Only for Local Music
   const sortControls = document.querySelector('.sort-controls');
   if (sortControls) {
