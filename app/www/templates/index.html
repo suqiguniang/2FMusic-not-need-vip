@@ -7,24 +7,16 @@
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 
     <title>2FMusic</title>
-    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}" crossorigin="use-credentials">
+    <link rel="manifest" href="{{ 'manifest.json' | static_url }}" crossorigin="use-credentials">
 
     <meta name="mobile-web-app-capable" content="yes">
 
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="2FMusic">
-    <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/ICON_256.PNG') }}">
+    <link rel="apple-touch-icon" href="{{ 'images/ICON_256.PNG' | static_url }}">
 
     <meta name="theme-color" content="#000000">
-
-    <!-- 预加载关键资源以防止闪烁 -->
-    <link rel="preload" href="{{ url_for('static', filename='css/font-awesome/all.min.css') }}" as="style">
-    <link rel="preload" href="{{ url_for('static', filename='css/font-awesome/webfonts/fa-solid-900.woff2') }}" as="font" type="font/woff2" crossorigin="anonymous">
-    <link rel="preload" href="{{ url_for('static', filename='css/font-awesome/webfonts/fa-regular-400.woff2') }}" as="font" type="font/woff2" crossorigin="anonymous">
-    <link rel="preload" href="{{ url_for('static', filename='css/font-awesome/webfonts/fa-brands-400.woff2') }}" as="font" type="font/woff2" crossorigin="anonymous">
-    <link rel="preload" href="{{ url_for('static', filename='css/style.css') }}" as="style">
-    <link rel="preload" href="{{ url_for('static', filename='css/favorites.css') }}" as="style">
 
     <script>
         (function () {
@@ -48,11 +40,11 @@
         })();
     </script>
 
-    <link rel="icon" href="{{ url_for('static', filename='images/ICON_256.PNG') }}">
-    <script src="{{ url_for('static', filename='js/lib/color-thief.umd.js') }}"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/font-awesome/all.min.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/favorites.css') }}">
+    <link rel="icon" href="{{ 'images/ICON_256.PNG' | static_url }}">
+    <script src="{{ 'js/lib/color-thief.umd.js' | static_url }}"></script>
+    <link rel="stylesheet" href="{{ 'css/font-awesome/all.min.css' | static_url }}">
+    <link rel="stylesheet" href="{{ 'css/style.css' | static_url }}">
+    <link rel="stylesheet" href="{{ 'css/favorites.css' | static_url }}">
 </head>
 
 <body>
@@ -356,7 +348,7 @@
 
         <footer id="player-bar">
             <div class="player-info" id="open-detail-view" title="点击查看歌词">
-                <img src="{{ url_for('static', filename='images/ICON_256.PNG') }}" id="current-cover" alt="Cover">
+                <img src="{{ 'images/ICON_256.PNG' | static_url }}" id="current-cover" alt="Cover">
                 <div class="info-text">
                     <div id="current-title">等待播放</div>
                     <div id="current-artist">2FMusic</div>
@@ -400,7 +392,7 @@
 
             <div class="fp-content">
                 <div class="fp-art-area">
-                    <img src="{{ url_for('static', filename='images/ICON_256.PNG') }}" id="fp-cover" alt="Cover">
+                    <img src="{{ 'images/ICON_256.PNG' | static_url }}" id="fp-cover" alt="Cover">
                     <div class="fp-info">
                         <h2 id="fp-title">歌曲标题</h2>
                         <p id="fp-artist">歌手</p>
@@ -735,7 +727,7 @@
                     if (song) {
                         const title = song.title || song.filename;
                         const artist = song.artist || '未知艺术家';
-                        const cover = song.album_art || song.cover || "{{ url_for('static', filename='images/ICON_256.PNG') }}";
+                        const cover = song.album_art || song.cover || "{{ 'images/ICON_256.PNG' | static_url }}";
 
                         ['current-title', 'fp-title'].forEach(id => {
                             const el = document.getElementById(id);
@@ -755,7 +747,7 @@
             } catch (e) { console.error('Fast init error', e); }
         })();
     </script>
-    <script type="module" src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script type="module" src="{{ 'js/main.js' | static_url }}"></script>
 </body>
 
 </html>

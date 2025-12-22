@@ -254,9 +254,70 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000
 app.secret_key = os.environ.get('APP_SECRET_KEY', '2fmusic_secret')
 app.permanent_session_lifetime = timedelta(days=30)
 
+# 缓存静态文件的MD5值，避免重复计算
+static_file_md5_cache = {}
+
+def get_file_md5(file_path):
+    """计算文件的MD5值"""
+    if file_path in static_file_md5_cache:
+        return static_file_md5_cache[file_path]
+    
+    try:
+        with open(file_path, 'rb') as f:
+            md5_hash = hashlib.md5()
+            for chunk in iter(lambda: f.read(4096), b''):
+                md5_hash.update(chunk)
+            md5_value = md5_hash.hexdigest()
+            static_file_md5_cache[file_path] = md5_value
+            return md5_value
+    except Exception:
+        # 如果计算失败，返回当前时间戳作为 fallback
+        return str(int(time.time()))
+
+@app.template_filter('static_url')
+def static_url(filename):
+    """生成带有MD5版本号的静态文件URL，用于强制浏览器刷新缓存"""
+    # 获取静态文件的绝对路径
+    file_path = os.path.join(STATIC_DIR, filename)
+    # 计算文件的MD5值作为版本参数
+    md5_value = get_file_md5(file_path)
+    # 使用MD5值作为查询参数，确保只有文件内容变化时版本号才会改变
+    return url_for('static', filename=filename, v=md5_value)
+
+# 拦截静态文件请求，确保所有静态资源都有版本参数
+@app.before_request
+def ensure_static_version():
+    """确保所有静态资源请求都带有版本参数"""
+    if request.path.startswith('/static/'):
+        # 如果请求没有版本参数，重定向到带有版本参数的URL
+        if 'v' not in request.args:
+            # 从请求路径中提取文件名
+            filename = request.path.replace('/static/', '', 1)
+            # 计算文件的MD5值
+            file_path = os.path.join(STATIC_DIR, filename)
+            md5_value = get_file_md5(file_path)
+            # 重定向到带有MD5版本参数的URL
+            return redirect(request.path + '?v=' + md5_value)
+
 @app.route('/favicon.ico')
 def favicon():
     return send_file(os.path.join(STATIC_DIR, 'images', 'ICON_256.PNG'), mimetype='image/png')
+
+# 为HTML响应添加缓存控制头，使用条件缓存确保获取最新版本
+@app.after_request
+def add_cache_control(response):
+    """为HTML响应添加缓存控制头"""
+    # 检查响应是否是HTML类型
+    if response.content_type.startswith('text/html'):
+        # 使用条件缓存，允许浏览器缓存但每次都会验证
+        response.headers['Cache-Control'] = 'public, must-revalidate'
+        # 设置ETag，用于快速比较内容是否变化
+        if not response.headers.get('ETag'):
+            # 基于响应内容生成简单的ETag
+            import hashlib
+            etag = hashlib.md5(response.data).hexdigest()
+            response.headers['ETag'] = f'"{etag}"'
+    return response
 
 APP_AUTH_USER = os.environ.get('APP_AUTH_USER', 'admin')
 APP_AUTH_PASSWORD = args.password
