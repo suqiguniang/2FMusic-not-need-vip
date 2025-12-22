@@ -1491,6 +1491,27 @@ function parseAndRenderLyrics(lrc) {
     line = line.trim();
     if (!line) return;
 
+    // Try parsing as NetEase JSON format first (starts with {)
+    if (line.startsWith('{')) {
+      try {
+        // Example: {"t":3000,"c":[{"tx":"制作人: "},{"tx":"King Henry"}]}
+        // Some lines might be partial or malformed, so we wrap in try-catch
+        // NOTE: Sometimes the line might have trailing comma or something, but usually it's one JSON object per line for YRC/JSON-LRC
+        const json = JSON.parse(line);
+        if (typeof json.t === 'number') {
+          const time = json.t / 1000; // ms to s
+          let text = '';
+          if (Array.isArray(json.c)) {
+            text = json.c.map(item => item.tx || '').join('').trim();
+          }
+          if (text) state.lyricsData.push({ time, text });
+          return; // Skip regex check if JSON parsed successfully
+        }
+      } catch (e) {
+        // Not valid JSON, fall through to regex
+      }
+    }
+
     const match = timeRegex.exec(line);
     if (match) {
       const min = parseInt(match[1]);
@@ -1501,7 +1522,10 @@ function parseAndRenderLyrics(lrc) {
       if (text) state.lyricsData.push({ time, text });
     } else {
       // 如果没有时间戳但有文本，也作为一行歌词添加
-      state.lyricsData.push({ time: 0, text: line });
+      // Only add if it doesn't look like broken JSON
+      if (!line.startsWith('{')) {
+        state.lyricsData.push({ time: 0, text: line });
+      }
     }
   });
 
