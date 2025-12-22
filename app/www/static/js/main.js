@@ -14,20 +14,37 @@ document.addEventListener('DOMContentLoaded', async () => {
     const response = await api.system.versionCheck();
     
     if (response && response.version) {
-      // 如果是首次访问或版本号变化
-      if (!currentVersion || currentVersion !== response.version) {
-        console.log('前端已过时！\n最新版本：' + response.version, '\n当前版本：' + currentVersion);
-        showToast('检测到新版本，正在更新页面...');
-        
-        // 更新本地存储的版本号
-        localStorage.setItem(VERSION_STORAGE_KEY, response.version);
-        
-        // 强制清除浏览器缓存并刷新页面
-        window.location.reload(true);
-      }
-      else {
-        console.log('前端已是最新！\n最新版本：' + response.version, '\n当前版本：' + currentVersion);
-      }
+      // 如果是首次访问（没有localStorage版本号），直接存储当前版本号，不提示更新
+        // 因为此时浏览器已经从服务器获取了最新的前端文件
+        if (!currentVersion) {
+          console.log('无版本数据，设置当前版本：' + response.version);
+          localStorage.setItem(VERSION_STORAGE_KEY, response.version);
+        }
+        // 如果版本号变化，提示用户更新
+        else if (currentVersion !== response.version) {
+          console.log('前端已过时！\n最新版本：' + response.version, '\n当前版本：' + currentVersion);
+          
+          // 使用通用确认模态框询问用户是否更新
+          showConfirmDialog(
+            '检测到新版本',
+            `发现前端新版本，是否立即更新页面？\n<span style="color: red;">如出现问题，请先尝试使用设置页"清除应用缓存"！</span>`,
+            () => {
+              // 更新本地存储的版本号
+              localStorage.setItem(VERSION_STORAGE_KEY, response.version);
+              
+              // 强制清除浏览器缓存并刷新页面
+              window.location.reload(true);
+            },
+            {
+              titleSize: '1.3rem',  // 设置标题大小
+              messageSize: '1rem',  // 设置文本大小
+              allowLineBreak: true  // 允许文本换行
+            }
+          );
+        }
+        else {
+          console.log('前端已是最新！\n最新版本：' + response.version, '\n当前版本：' + currentVersion);
+        }
     }
   } catch (error) {
     console.error('版本检查失败:', error);
@@ -226,8 +243,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Clear Cache
     document.getElementById('setting-clear-cache')?.addEventListener('click', () => {
       showConfirmDialog('彻底清除数据', '确定要删除本网站的所有本地数据吗？<br>包括缓存、Cookie、偏好设置等。页面将重新加载。', async () => {
-        // 1. Clear Storage
-        localStorage.clear();
+        // 1. Clear Storage (保留版本号)
+        const VERSION_STORAGE_KEY = 'app_version';
+        const version = localStorage.getItem(VERSION_STORAGE_KEY);
+        
+        // 清除除了版本号之外的所有localStorage数据
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key !== VERSION_STORAGE_KEY) {
+            localStorage.removeItem(key);
+            i--; // 因为删除后长度会减1，需要调整索引
+          }
+        }
+        
         sessionStorage.clear();
 
         // 2. Clear Cookies

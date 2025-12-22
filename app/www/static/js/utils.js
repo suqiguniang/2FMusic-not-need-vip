@@ -93,9 +93,47 @@ export function hideProgressToast() {
   loadingToasts.forEach(el => removeToast(el));
   state.progressToastEl = null;
 }
-export function showConfirmDialog(title, message, onConfirm) {
-  if (ui.confirmTitle) ui.confirmTitle.innerText = title;
-  if (ui.confirmText) ui.confirmText.innerHTML = message;
+export function showConfirmDialog(title, message, onConfirm, options = {}) {
+  if (ui.confirmTitle) {
+    ui.confirmTitle.innerText = title;
+    // 自定义标题颜色
+    if (options.titleColor) {
+      ui.confirmTitle.style.color = options.titleColor;
+    } else {
+      ui.confirmTitle.style.color = ''; // 重置为默认颜色
+    }
+    // 自定义标题大小
+    if (options.titleSize) {
+      ui.confirmTitle.style.fontSize = options.titleSize;
+    } else {
+      ui.confirmTitle.style.fontSize = ''; // 重置为默认大小
+    }
+  }
+  
+  if (ui.confirmText) {
+    // 文本换行处理
+    const displayMessage = options.allowLineBreak ? message : message.replace(/\n/g, '<br>');
+    ui.confirmText.innerHTML = displayMessage;
+    // 自定义消息文本颜色
+    if (options.messageColor) {
+      ui.confirmText.style.color = options.messageColor;
+    } else {
+      ui.confirmText.style.color = ''; // 重置为默认颜色
+    }
+    // 自定义消息文本大小
+    if (options.messageSize) {
+      ui.confirmText.style.fontSize = options.messageSize;
+    } else {
+      ui.confirmText.style.fontSize = ''; // 重置为默认大小
+    }
+    // 设置文本换行样式
+    if (options.allowLineBreak) {
+      ui.confirmText.style.whiteSpace = 'pre-line';
+    } else {
+      ui.confirmText.style.whiteSpace = ''; // 重置为默认样式
+    }
+  }
+  
   state.currentConfirmAction = onConfirm;
   ui.confirmModalOverlay?.classList.add('active');
 }
