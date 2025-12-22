@@ -4,6 +4,8 @@ import { api } from './api.js';
 import { showToast, hideProgressToast, showConfirmDialog } from './utils.js';
 
 let scanInterval = null;
+const savedScraped = localStorage.getItem('scrapedPaths');
+const scrapedPaths = new Map(savedScraped ? JSON.parse(savedScraped) : []);
 
 export function startScanPolling(isUserAction = false, onRefreshSongs, onRefreshMounts) {
   if (state.isPolling) return;
@@ -11,6 +13,7 @@ export function startScanPolling(isUserAction = false, onRefreshSongs, onRefresh
   let hasTrackedScan = false;
   let hasTrackedScrape = false;
   let lastScrapingPath = null;
+  let lastScrapingMsg = null; // Store final message
 
   // 轮询函数，使用 setTimeout 实现动态间隔
   const poll = async () => {
@@ -50,6 +53,11 @@ export function startScanPolling(isUserAction = false, onRefreshSongs, onRefresh
           const text = status.current_file || '后台处理中...';
           const currentPath = status.current_path || '';
 
+          // Capture potential completion message
+          if (text.includes('完成')) {
+            lastScrapingMsg = text;
+          }
+
           bars.forEach(barContainer => {
             const card = barContainer.closest('.mount-card');
             let mountPath = card ? card.dataset.mountPath : null;
@@ -87,13 +95,7 @@ export function startScanPolling(isUserAction = false, onRefreshSongs, onRefresh
               if (label) label.innerText = `${text} (${pct}%)`;
               barContainer.classList.remove('completed'); // Remove completed state if it starts scraping again
             } else {
-              // Hide others UNLESS they are in "completed" state?
-              // For now, if we switch to another folder, we hide others.
-              // But if we want to persist "Completed" indefinitely until refresh, we shouldn't hide indiscriminately.
-              // Let's only hide if NOT completed.
-              if (!barContainer.classList.contains('completed')) {
-                barContainer.classList.add('hidden');
-              }
+              // Do NOT hide other bars, just leave them as is
             }
           });
 
@@ -108,6 +110,11 @@ export function startScanPolling(isUserAction = false, onRefreshSongs, onRefresh
             hasTrackedScrape = false;
             // Completion logic: Find the card for lastScrapingPath and mark green
             if (lastScrapingPath) {
+              // Add to map to persist
+              const finalMsg = lastScrapingMsg || '后台刮削完成';
+              scrapedPaths.set(lastScrapingPath, finalMsg);
+              localStorage.setItem('scrapedPaths', JSON.stringify(Array.from(scrapedPaths.entries())));
+
               const bars = document.querySelectorAll('.mount-card-progress');
               bars.forEach(barContainer => {
                 const card = barContainer.closest('.mount-card');
@@ -129,19 +136,16 @@ export function startScanPolling(isUserAction = false, onRefreshSongs, onRefresh
                     fill.style.width = '100%';
                     fill.style.background = '#28a745'; // Green
                   }
-                  if (label) label.innerText = '后台刮削完成';
+                  if (label) label.innerText = finalMsg;
                 }
               });
             }
             // Do NOT show global toast
             onRefreshSongs && onRefreshSongs();
+            lastScrapingPath = null;
+            lastScrapingMsg = null;
           }
-          // If not scraping and not just finished, ensure all non-completed bars are hidden
-          bars.forEach(barContainer => {
-            if (!barContainer.classList.contains('completed')) {
-              barContainer.classList.add('hidden');
-            }
-          });
+          // Do NOT hide bars when idle
         }
       }
 
@@ -227,9 +231,9 @@ export async function loadMountPoints() {
           topRow.appendChild(infoDiv);
           topRow.appendChild(btn);
 
-          // Progress Bar (Hidden by default)
+          // Progress Bar (Always visible now)
           const progressContainer = document.createElement('div');
-          progressContainer.className = 'mount-card-progress hidden';
+          progressContainer.className = 'mount-card-progress'; // Removed 'hidden'
           // Ensure it takes width
           progressContainer.style.width = '100%';
           progressContainer.style.marginTop = '0.8rem';
@@ -245,7 +249,9 @@ export async function loadMountPoints() {
           progressText.style.whiteSpace = 'nowrap';
           progressText.style.overflow = 'hidden';
           progressText.style.textOverflow = 'ellipsis';
-          progressText.innerText = '准备中...';
+
+          // Check persistence
+          const completedMsg = scrapedPaths.get(path);
 
           const track = document.createElement('div');
           track.style.height = '4px';
@@ -256,8 +262,17 @@ export async function loadMountPoints() {
           const fill = document.createElement('div');
           fill.className = 'progress-fill';
           fill.style.height = '100%';
-          fill.style.width = '0%';
-          fill.style.background = 'var(--primary)';
+
+          if (completedMsg) {
+            progressText.innerText = completedMsg;
+            fill.style.width = '100%';
+            fill.style.background = '#28a745'; // Green
+            progressContainer.classList.add('completed');
+          } else {
+            progressText.innerText = '已就绪';
+            fill.style.width = '0%';
+            fill.style.background = 'var(--primary)';
+          }
 
           track.appendChild(fill);
           progressContainer.appendChild(progressText);

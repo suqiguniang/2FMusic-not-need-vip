@@ -1,5 +1,24 @@
 import hashlib
 import re
+import requests
+import ssl
+import urllib3
+from requests.adapters import HTTPAdapter
+
+
+class CustomSSLAdapter(HTTPAdapter):
+    def init_poolmanager(self, connections, maxsize, block=False):
+        context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+        context.options |= 0x4  # OP_LEGACY_SERVER_CONNECT
+        self.poolmanager = urllib3.poolmanager.PoolManager(
+            num_pools=connections, maxsize=maxsize,
+            block=block, ssl_context=context)
+
+
+def get_legacy_session():
+    session = requests.Session()
+    session.mount('https://', CustomSSLAdapter())
+    return session
 
 
 def calculate_md5(string: str, base="hexstr"):

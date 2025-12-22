@@ -545,8 +545,18 @@ def get_metadata(file_path):
                 logger.warning(f"文件 {file_path} 元数据解析异常: {e2}")
         if audio:
             def get_tag(key):
+                val = None
+                # Method 1: Direct .get (EasyID3 etc)
                 if hasattr(audio, 'get'):
                     val = audio.get(key)
+                # Method 2: via .tags (FLAC etc)
+                elif hasattr(audio, 'tags') and audio.tags:
+                    val = audio.tags.get(key)
+                    # Try uppercase for Vorbis comments if standard key fails
+                    if not val:
+                        val = audio.tags.get(key.upper())
+                
+                if val:
                     if isinstance(val, list): return val[0]
                     return val
                 return None
@@ -810,7 +820,7 @@ def scrape_single_song(item, idx, total):
     song = item['song']
     
     # Update current path for UI (approximate due to concurrency)
-    SCAN_STATUS['current_path'] = song.get('path', '')
+    SCAN_STATUS['current_path'] = song['path']
     
     try:
         # 0. 先尝试提取内嵌封面 (Fix: 优先使用内嵌封面，避免无效刮削)
@@ -826,51 +836,89 @@ def scrape_single_song(item, idx, total):
         if not item['need_cover'] and not item['need_lyrics']:
             return
 
-        # 搜索
-        results = searchx.search_all(title=song['title'], artist=song['artist'], album=song['album'], timeout=10)
-        
-        # 增强逻辑: 如果指定专辑未搜索到结果，或结果中没有封面且我们需要封面，尝试忽略专辑名进行模糊搜索
-        # (这模仿了 get_album_art_api 的行为，它只使用 title 和 artist)
-        should_retry = False
-        
-        # Helper to check if any result has cover
+        # 搜索 (增加重试机制)
+        results = None
+        # Helper functions
         def any_has_cover(res_list):
             for r in res_list:
-                if r.get('cover'): return True
+                try:
+                    if r['cover']: return True
+                except:
+                    try:
+                        if r.get('cover'): return True
+                    except: pass
             return False
 
-        if not results:
-            should_retry = True
-        elif item['need_cover'] and not any_has_cover(results):
-            should_retry = True
+        def any_has_lyrics(res_list):
+            for r in res_list:
+                try:
+                    val = r['lyrics'] if 'lyrics' in r else r.get('lyrics')
+                    if val: return True
+                except: pass
+            return False
+
+        def is_satisfied(res_list):
+            ok_cover = not item['need_cover'] or any_has_cover(res_list)
+            ok_lyrics = not item['need_lyrics'] or any_has_lyrics(res_list)
+            return ok_cover and ok_lyrics
+
+        # 搜索 (顺序尝试: 网易云 -> 酷狗)
+        results = []
+        providers = [searchx.netease, searchx.kugou]
+        
+        for attempt in range(3):
+            results = [] 
             
-        if should_retry and song['album']: # 只有在原先有专辑名的情况下才值得重试
-            logger.info(f"精确搜索未找到满意结果(封面)，尝试忽略专辑名搜索: {song['title']}")
-            loose_results = searchx.search_all(title=song['title'], artist=song['artist'], album='', timeout=10)
-            if loose_results:
-                # 如果宽松搜索有结果，且原本没结果 或 宽松结果有封面而原结果没有
-                # 则优先使用宽松结果
-                if not results:
-                    results = loose_results
-                elif any_has_cover(loose_results) and not any_has_cover(results):
-                     results = loose_results
-                     # 如果宽松搜索有结果，且有封面，则合并结果（优先使用宽松结果）
-                     # 这里简单的策略：如果宽松结果找到了封面，就用宽松结果集
+            found_satisfactory = False
+            for prov in providers:
+                try:
+                    # 1. Strict Search
+                    p_res = prov.search(title=song['title'], artist=song['artist'], album=song['album'])
+                    if p_res:
+                        results.extend(p_res)
+                    
+                    if is_satisfied(results):
+                        found_satisfactory = True
+                        break
+                    
+                    # 2. Loose Search
+                    if item['need_cover'] and not any_has_cover(results) and song['album']:
+                         l_res = prov.search(title=song['title'], artist=song['artist'], album='')
+                         if l_res:
+                             results.extend(l_res)
+                         
+                         if is_satisfied(results):
+                             found_satisfactory = True
+                             break
+                except Exception as e:
+                    logger.warning(f"Provider {prov.__name__} failed: {e}")
+            
+            if results:
+                break
+            
+            if attempt < 2:
+                time.sleep(1) # Delay between retries
 
         if not results:
+            with scan_status_lock:
+                 SCAN_STATUS['failed'] = SCAN_STATUS.get('failed', 0) + 1
             return
         
-        # best_res = results[0] # 取最佳结果 -> 废弃，改为遍历查找
+        # 标记是否发生部分失败（例如没找到封面或歌词）
+        is_partial_fail = False
 
         # 处理歌词
         if item['need_lyrics']:
             found_lyrics = None
             for res in results:
-                if res.get('lyrics'):
-                    found_lyrics = res['lyrics']
-                    # 记录一下匹配到的源信息，方便调试
-                    # logger.info(f"找到歌词: source_title={res.get('title')}")
-                    break
+                try:
+                    # Try accessing 'lyrics' safely
+                    rec_lyrics = res['lyrics'] if 'lyrics' in res else res.get('lyrics')
+                    if rec_lyrics:
+                        found_lyrics = rec_lyrics
+                        break
+                except:
+                   pass
             
             if found_lyrics:
                 base_name = os.path.splitext(song['filename'])[0]
@@ -881,14 +929,22 @@ def scrape_single_song(item, idx, total):
                     logger.info(f"自动保存歌词成功: {save_lrc_path}")
                 except Exception as e:
                     logger.warning(f"保存歌词失败: {e}")
+                    is_partial_fail = True
+            else:
+                 # Needed lyrics but didn't find them
+                 is_partial_fail = True
 
         # 处理封面
         if item['need_cover']:
             found_cover = None
             for res in results:
-                if res.get('cover'):
-                    found_cover = res['cover']
-                    break
+                try:
+                     rec_cover = res['cover'] if 'cover' in res else res.get('cover')
+                     if rec_cover:
+                         found_cover = rec_cover
+                         break
+                except:
+                     pass
             
             if found_cover:
                 base_name = os.path.splitext(song['filename'])[0]
@@ -905,13 +961,22 @@ def scrape_single_song(item, idx, total):
                         logger.info(f"自动保存封面成功: {local_cover_path}")
                     else:
                         logger.warning(f"下载封面失败: {resp.status_code} - {found_cover}")
+                        is_partial_fail = True
                 except Exception as e:
                     logger.warning(f"下载封面异常: {e}")
+                    is_partial_fail = True
             else:
                 logger.info(f"结果中未包含封面: {song['title']}")
+                is_partial_fail = True
+        
+        if is_partial_fail:
+             with scan_status_lock:
+                 SCAN_STATUS['failed'] = SCAN_STATUS.get('failed', 0) + 1
     
     except Exception as e:
         logger.warning(f"刮削单曲失败 {song['title']}: {e}")
+        with scan_status_lock:
+             SCAN_STATUS['failed'] = SCAN_STATUS.get('failed', 0) + 1
     finally:
         # 更新状态 (移至finally块，确保只有在处理完成后才更新进度，且使用锁保证线程安全)
         with scan_status_lock:
@@ -957,6 +1022,9 @@ def auto_scrape_missing_metadata():
             total = len(songs_to_scrape)
             if total == 0:
                 logger.info("没有需要刮削的歌曲。")
+                # 强制显示完成状态一段时间，让前端捕获
+                SCAN_STATUS['current_file'] = "后台刮削完成"
+                time.sleep(1.5)
                 SCAN_STATUS['is_scraping'] = False
                 return
 
@@ -965,6 +1033,7 @@ def auto_scrape_missing_metadata():
             # 更新状态 total
             SCAN_STATUS['total'] = total
             SCAN_STATUS['processed'] = 0
+            SCAN_STATUS['failed'] = 0
 
             # 使用线程池并发处理
             max_workers = 20  # 控制并发数，避免请求过快被封禁
@@ -974,13 +1043,27 @@ def auto_scrape_missing_metadata():
                     # 提交任务
                     futures.append(executor.submit(scrape_single_song, item, idx, total))
                 
-                # 等待所有任务完成
-                concurrent.futures.wait(futures)
+                # 等待所有任务完成并捕获异常
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logger.error(f"刮削任务执行异常: {e}")
 
         except Exception as e:
             logger.error(f"自动刮削任务异常: {e}")
         finally:
             logger.info("自动刮削任务结束")
+            
+            # 强制停留完成状态 (带上失败统计)
+            failed_count = SCAN_STATUS.get('failed', 0)
+            if failed_count > 0:
+                SCAN_STATUS['current_file'] = f"后台刮削完成 ({failed_count}首失败)"
+            else:
+                SCAN_STATUS['current_file'] = "后台刮削完成"
+            
+            time.sleep(1.5)
+            
             # 只有当不在扫描文件时才重置状态，避免覆盖文件扫描的状态
             # 实际上由于是分离线程，这里重置可能会影响UI显示，但 current_file 为空通常表示空闲
             if not SCAN_STATUS.get('scanning', False):
@@ -1137,6 +1220,8 @@ def scan_library_incremental():
         logger.info("扫描完成。")
         
         # --- 自动刮削缺失元数据 (后台独立线程) ---
+        SCAN_STATUS['is_scraping'] = True
+        SCAN_STATUS['current_file'] = "正在准备自动刮削..."
         threading.Thread(target=auto_scrape_missing_metadata).start()
         
         global LIBRARY_VERSION; LIBRARY_VERSION = time.time()
