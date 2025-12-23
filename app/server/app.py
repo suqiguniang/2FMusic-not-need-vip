@@ -1263,7 +1263,7 @@ def scan_library_incremental():
             db_rows = {row['path']: row for row in cursor.fetchall()}
             
             # 删除不存在的文件
-            # 注意：如果某个挂载点被临时拔出，这里会删除其歌曲。
+            # 注意：如果某个点被临时拔出，这里会删除其歌曲。
             # 简单起见：全量比对，消失即删除。
             to_delete_paths = set(db_rows.keys()) - set(disk_files.keys())
             if to_delete_paths:
@@ -1442,7 +1442,7 @@ def play_music(song_id):
     logger.warning(f"文件未找到或ID无效: {song_id}")
     return jsonify({'error': 'Not Found'}), 404
 
-# --- 挂载相关 ---
+# --- 目录相关 ---
 @app.route('/api/mount_points', methods=['GET'])
 def list_mount_points():
     try:
@@ -1464,7 +1464,7 @@ def check_has_music(path):
 
 @app.route('/api/mount_points', methods=['POST'])
 def add_mount_point():
-    logger.info("API请求: 添加挂载点")
+    logger.info("API请求: 添加目录路径点")
     try:
         path = request.json.get('path')
         if not path or not os.path.exists(path):
@@ -1478,7 +1478,7 @@ def add_mount_point():
         
         with get_db() as conn:
             if conn.execute("SELECT 1 FROM mount_points WHERE path=?", (path,)).fetchone():
-                return jsonify({'success': False, 'error': '已挂载'})
+                return jsonify({'success': False, 'error': '已添加'})
             conn.execute("INSERT INTO mount_points (path, created_at) VALUES (?, ?)", (path, time.time()))
             conn.commit()
 
@@ -1486,9 +1486,9 @@ def add_mount_point():
         refresh_watchdog_paths()
         threading.Thread(target=scan_library_incremental, daemon=True).start()
         
-        return jsonify({'success': True, 'message': '挂载点已添加，正在后台处理...'})
+        return jsonify({'success': True, 'message': '目录已添加，正在后台处理...'})
     except Exception as e:
-        logger.exception(f"添加挂载点失败: {e}")
+        logger.exception(f"添加目录失败: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/mount_points', methods=['DELETE'])
@@ -2150,7 +2150,7 @@ def upload_file():
         filename = file.filename
         target_dir = request.form.get('target_dir') or MUSIC_LIBRARY_PATH
         target_dir = os.path.abspath(target_dir)
-        # 仅允许保存到音乐库或已添加的挂载目录（及其子目录）
+        # 仅允许保存到音乐库或已添加的目录（及其子目录）
         allowed_roots = [os.path.abspath(MUSIC_LIBRARY_PATH)]
         try:
             with get_db() as conn:

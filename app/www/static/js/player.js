@@ -1094,7 +1094,7 @@ export function switchTab(tab) {
   const titles = {
     'local': '本地音乐',
     'fav': '我的收藏',
-    'mount': '挂载管理',
+    'mount': '目录管理',
     'netease': '网易下载',
     'upload': '上传音乐',
     'settings': '系统设置'
