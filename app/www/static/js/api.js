@@ -78,6 +78,14 @@ export const api = {
         body: JSON.stringify({ path })
       });
       return jsonOrThrow(res);
+    },
+    async update(path) {
+      const res = await fetch('/api/mount_points/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path })
+      });
+      return jsonOrThrow(res);
     }
   },
   netease: {

@@ -219,6 +219,27 @@ export async function loadMountPoints() {
           infoDiv.appendChild(icon);
           infoDiv.appendChild(pathSpan);
 
+          const actionsDiv = document.createElement('div');
+          actionsDiv.style.display = 'flex';
+          actionsDiv.style.alignItems = 'center';
+          actionsDiv.style.gap = '0.5rem';
+
+          const updateBtn = document.createElement('button');
+          updateBtn.className = 'btn-update-mount';
+          updateBtn.textContent = '更新';
+          updateBtn.onclick = async (e) => {
+            e.stopPropagation();
+            try {
+              const res = await api.mount.update(path);
+              if (res.success) {
+                showToast('已触发更新...');
+                // Polling will update the UI
+              } else {
+                showToast('更新请求失败: ' + res.error);
+              }
+            } catch (err) { showToast('网络错误'); }
+          };
+
           const btn = document.createElement('button');
           btn.className = 'btn-remove-mount';
           btn.readOnly = true; // Just in case
@@ -228,8 +249,11 @@ export async function loadMountPoints() {
             triggerRemoveMount(path);
           };
 
+          actionsDiv.appendChild(updateBtn);
+          actionsDiv.appendChild(btn);
+
           topRow.appendChild(infoDiv);
-          topRow.appendChild(btn);
+          topRow.appendChild(actionsDiv);
 
           // Progress Bar (Always visible now)
           const progressContainer = document.createElement('div');

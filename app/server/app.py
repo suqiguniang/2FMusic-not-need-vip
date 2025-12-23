@@ -1089,6 +1089,116 @@ def retry_scrape_mount():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/mount_points/update', methods=['POST'])
+def update_mount_point():
+    try:
+        path = request.json.get('path')
+        if not path:
+             return jsonify({'success': False, 'error': '未指定路径'})
+        
+        if SCAN_STATUS.get('is_scraping') or SCAN_STATUS.get('scanning'):
+             return jsonify({'success': False, 'error': '后台任务进行中，请稍后'})
+             
+        threading.Thread(target=scan_directory_single, args=(path,), daemon=True).start()
+        return jsonify({'success': True, 'message': '开始更新目录...'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+def scan_directory_single(target_dir):
+    """扫描指定目录并更新数据库"""
+    global SCAN_STATUS
+    
+    if not os.path.exists(target_dir):
+        logger.error(f"目录不存在: {target_dir}")
+        return
+
+    # Check lock (reuse logic partially or just check global status)
+    if SCAN_STATUS.get('scanning'): return
+
+    try:
+        with app.app_context():
+            SCAN_STATUS.update({'scanning': True, 'total': 0, 'processed': 0, 'current_file': '正在扫描目录...'})
+            logger.info(f"开始单独扫描目录: {target_dir}")
+            
+            disk_files = {} # path -> info
+            supported_exts = AUDIO_EXTS
+            
+            for root, dirs, files in os.walk(target_dir):
+                 dirs[:] = [d for d in dirs if d not in ('lyrics', 'covers')]
+                 for f in files:
+                     if f.lower().endswith(supported_exts):
+                         path = os.path.join(root, f)
+                         try:
+                             stat = os.stat(path)
+                             info = {'mtime': stat.st_mtime, 'size': stat.st_size, 'path': path, 'filename': f}
+                             disk_files[path] = info
+                         except: pass
+
+            with get_db() as conn:
+                # 只获取相关路径的歌曲
+                cursor = conn.cursor()
+                # Assuming path stored in DB is absolute
+                cursor.execute("SELECT id, path, mtime, size FROM songs WHERE path LIKE ? || '%'", (target_dir,))
+                db_rows = {row['path']: row for row in cursor.fetchall()}
+                
+                to_delete_paths = set(db_rows.keys()) - set(disk_files.keys())
+                if to_delete_paths:
+                    cursor.executemany("DELETE FROM songs WHERE path=?", [(p,) for p in to_delete_paths])
+                    conn.commit()
+
+                files_to_process_list = []
+                for path, info in disk_files.items():
+                    db_rec = db_rows.get(path)
+                    # If new or modified
+                    if not db_rec or db_rec['mtime'] != info['mtime'] or db_rec['size'] != info['size']:
+                        files_to_process_list.append(info)
+
+                total_files = len(files_to_process_list)
+                SCAN_STATUS.update({'total': total_files, 'processed': 0})
+                
+                to_update_db = []
+                
+                if total_files > 0:
+                    def process_file_metadata(info):
+                        # Simple inline version
+                        SCAN_STATUS['current_path'] = info['path']
+                        meta = get_metadata(info['path'])
+                        sid = generate_song_id(info['path'])
+                        base_path = os.path.splitext(info['path'])[0]
+                        has_cover = 1 if os.path.exists(base_path + ".jpg") or os.path.exists(os.path.join(MUSIC_LIBRARY_PATH, 'covers', f"{os.path.basename(base_path)}.jpg")) else 0
+                        if has_cover == 0:
+                            if extract_embedded_cover(info['path']): has_cover = 1
+                        return (sid, info['path'], info['filename'], meta['title'], meta['artist'], meta['album'], info['mtime'], info['size'], has_cover)
+
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                         futures = {executor.submit(process_file_metadata, item): item for item in files_to_process_list}
+                         for future in concurrent.futures.as_completed(futures):
+                             try:
+                                 res = future.result()
+                                 to_update_db.append(res)
+                             except Exception: pass
+                             SCAN_STATUS['processed'] += 1
+                             if SCAN_STATUS['processed'] % 5 == 0:
+                                 SCAN_STATUS['current_file'] = f"处理中... {int((SCAN_STATUS['processed']/total_files)*100)}%"
+
+                if to_update_db:
+                    conn.executemany('''
+                        INSERT OR REPLACE INTO songs (id, path, filename, title, artist, album, mtime, size, has_cover)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', to_update_db)
+                    conn.commit()
+            
+            # Finally trigger scraping for missing metadata in this dir
+            auto_scrape_missing_metadata(target_dir)
+
+    except Exception as e:
+        logger.exception(f"目录扫描失败: {e}")
+    finally:
+        SCAN_STATUS['scanning'] = False
+        SCAN_STATUS['current_file'] = '扫描完成'
+        SCAN_STATUS['processed'] = SCAN_STATUS['total']
+        global LIBRARY_VERSION
+        LIBRARY_VERSION = time.time()
 
 # --- 优化后的并发扫描逻辑 ---
 def scan_library_incremental():
