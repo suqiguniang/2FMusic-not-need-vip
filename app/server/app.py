@@ -557,7 +557,11 @@ def get_metadata(file_path):
                         val = audio.tags.get(key.upper())
                 
                 if val:
-                    if isinstance(val, list): return val[0]
+                    if isinstance(val, list):
+                        val = val[0]
+                    # 确保返回值是字符串类型，处理ASFUnicodeAttribute等特殊类型
+                    if val is not None and not isinstance(val, str):
+                        val = str(val)
                     return val
                 return None
             metadata['title'] = get_tag('title')
@@ -1168,7 +1172,11 @@ def scan_directory_single(target_dir):
                         has_cover = 1 if os.path.exists(base_path + ".jpg") or os.path.exists(os.path.join(MUSIC_LIBRARY_PATH, 'covers', f"{os.path.basename(base_path)}.jpg")) else 0
                         if has_cover == 0:
                             if extract_embedded_cover(info['path']): has_cover = 1
-                        return (sid, info['path'], info['filename'], meta['title'], meta['artist'], meta['album'], info['mtime'], info['size'], has_cover)
+                        # 确保所有元数据都是字符串类型，避免数据库绑定错误
+                        title = str(meta['title']) if meta['title'] is not None else ''
+                        artist = str(meta['artist']) if meta['artist'] is not None else ''
+                        album = str(meta['album']) if meta['album'] is not None else ''
+                        return (sid, info['path'], info['filename'], title, artist, album, info['mtime'], info['size'], has_cover)
 
                     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                          futures = {executor.submit(process_file_metadata, item): item for item in files_to_process_list}
@@ -1295,7 +1303,11 @@ def scan_library_incremental():
                         if extract_embedded_cover(info['path']):
                             has_cover = 1
                             
-                    return (sid, info['path'], info['filename'], meta['title'], meta['artist'], meta['album'], info['mtime'], info['size'], has_cover)
+                    # 确保所有元数据都是字符串类型，避免数据库绑定错误
+                    title = str(meta['title']) if meta['title'] is not None else ''
+                    artist = str(meta['artist']) if meta['artist'] is not None else ''
+                    album = str(meta['album']) if meta['album'] is not None else ''
+                    return (sid, info['path'], info['filename'], title, artist, album, info['mtime'], info['size'], has_cover)
 
                 with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                     futures = {executor.submit(process_file_metadata, item): item for item in files_to_process_list}
