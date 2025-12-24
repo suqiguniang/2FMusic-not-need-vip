@@ -1,44 +1,24 @@
-import json
-import logging
-import urllib.parse
-from functools import lru_cache
-
 import requests
+import hashlib
 
-from mod import textcompare, tools
-from mygo.devtools import no_error
-from mod.ttscn import t2s
-
-headers = {
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0',
-    'origin': 'https://y.qq.com',
-    'referer': 'https://y.qq.com/portal/player.html',
-}
-
-logger = logging.getLogger(__name__)
-
-QQ_SEARCH_URL = 'https://c.y.qq.com/soso/fcgi-bin/client_search_cp'
-QQ_SONG_DETAIL_URL = 'https://c.y.qq.com/v8/fcg-bin/fcg_play_single_song.fcg'
-QQ_VKEY_URL = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
+QQ_SEARCH_URL = 'https://c.y.qq.com/soso/fcgi-bin/music_search_new_platform'
 QQ_LYRIC_URL = 'https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg'
 QQ_ALBUM_IMG_URL = 'http://imgcache.qq.com/music/photo/album_300/{}/300_albumpic_{}_0.jpg'
 
-
-def listify(obj):
-    if isinstance(obj, list):
-        return obj
-    else:
-        return [obj]
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0',
+    'Referer': 'https://y.qq.com/'
+}
 
 def parse_f_field(f_str):
-    # 解析f字段
     fields = f_str.split('|')
     return {
-        'song_id': fields[0],
-        'title': fields[1],
-        'artist': fields[3],
-        'img_id': fields[4],
-        'songmid': fields[19] if len(fields) > 19 else '',
+        'song_id': fields[0] if len(fields) > 0 else '',
+        'song_name': fields[1] if len(fields) > 1 else '',
+        'singer_name': fields[3] if len(fields) > 3 else '',
+        'img_id': fields[4] if len(fields) > 4 else '',
+        'album': fields[5] if len(fields) > 5 else '',
+        'songmid': fields[20] if len(fields) > 20 else '',
     }
 
 def get_cover_url(img_id):
@@ -48,85 +28,61 @@ def get_cover_url(img_id):
     except Exception:
         return None
 
-def get_songmid(song_id):
-    params = {
-        'songid': song_id,
-        'tpl': 'yqq_song_detail',
-        'format': 'json',
-    }
-    resp = requests.get(QQ_SONG_DETAIL_URL, params=params, headers=headers, timeout=10)
-    data = resp.json()
-    try:
-        return data['data'][0]['mid']
-    except Exception:
-        return None
-
 def get_lyrics(songmid):
     params = {
         'songmid': songmid,
         'format': 'json',
         'nobase64': 1,
     }
-    resp = requests.get(QQ_LYRIC_URL, params=params, headers=headers, timeout=10)
+    resp = requests.get(QQ_LYRIC_URL, params=params, headers=HEADERS, timeout=10)
     data = resp.json()
     if data.get('code') == 0 and 'lyric' in data:
         return data['lyric']
-    elif data.get('code') == -1310:
-        # 需要Referer
-        resp = requests.get(QQ_LYRIC_URL, params=params, headers=headers, timeout=10)
-        data = resp.json()
-        return data.get('lyric', None)
     return None
 
-def search_track(title, artist, album):
-    result_list = []
-    search_str = ' '.join([item for item in [title, artist, album] if item])
+def search_track(keyword, page=1, num=10):
     params = {
-        'w': search_str,
-        'p': 1,
-        'n': 5,
-        'format': 'json',
+        'searchid': '53806572956004615',
+        't': 1,
+        'aggr': 1,
+        'cr': 1,
+        'catZhida': 1,
+        'lossless': 0,
+        'flag_qc': 0,
+        'p': page,
+        'n': num,
+        'w': keyword,
+        'format': 'json'
     }
-    resp = requests.get(QQ_SEARCH_URL, params=params, headers=headers, timeout=10)
+    resp = requests.get(QQ_SEARCH_URL, params=params, headers=HEADERS, timeout=10)
     data = resp.json()
+    song_list = []
     try:
-        song_list = data['data']['song']['list']
-    except Exception:
-        return []
-    for song in song_list:
-        title_conform_ratio = textcompare.association(title, song['songname'])
-        artist_conform_ratio = textcompare.assoc_artists(artist, song['singer'][0]['name'] if song['singer'] else '')
-        ratio = (title_conform_ratio * (artist_conform_ratio + 1) / 2) ** 0.5
-        if ratio < 0.2:
-            continue
-        songmid = song.get('songmid')
-        lyrics = get_lyrics(songmid) if songmid else None
-        cover_url = get_cover_url(song.get('albumid'))
-        music_json_data = {
-            'title': song['songname'],
-            'artist': song['singer'][0]['name'] if song['singer'] else '',
-            'album': song.get('albumname', ''),
-            'lyrics': lyrics,
-            'cover': cover_url,
-            'id': tools.calculate_md5(f"title:{song['songname']};artists:{song['singer'][0]['name'] if song['singer'] else ''};album:{song.get('albumname', '')}", base='decstr'),
-        }
-        result_list.append(music_json_data)
-    return result_list
+        for item in data['data']['song']['list']:
+            f = item.get('f', '')
+            info = parse_f_field(f)
+            lyrics = get_lyrics(info['songmid']) if info['songmid'] else None
+            cover = get_cover_url(info['img_id']) if info['img_id'] else None
+            music_json_data = {
+                'title': info['song_name'],
+                'artist': info['singer_name'],
+                'album': info['album'],
+                'lyrics': lyrics,
+                'cover': cover,
+                'id': hashlib.md5(f"title:{info['song_name']};artists:{info['singer_name']};album:{info['album']}".encode('utf-8')).hexdigest()
+            }
+            song_list.append(music_json_data)
+    except Exception as e:
+        print('解析失败:', e)
+    return song_list
 
-@lru_cache(maxsize=64)
-@no_error(throw=logger.info, exceptions=(requests.RequestException, KeyError, IndexError, AttributeError))
-def search(title='', artist='', album=''):
-    title = str(title) if title else ''
-    artist = str(artist) if artist else ''
-    album = str(album) if album else ''
-    if not any((title, artist, album)):
-        return None
-    title = title.strip()
-    artist = artist.strip()
-    album = album.strip()
-    if title:
-        return search_track(title=title, artist=artist, album=album)
-    return None
+def search(title='', artist='', album='', page=1, num=10):
+    keyword = ' '.join([str(x) for x in [title, artist] if x])
+    if not keyword:
+        return []
+    return search_track(keyword, page=page, num=num)
 
 if __name__ == "__main__":
-    print(search(title="可能"))
+    result = search(title="可能", num=2)
+    for song in result:
+        print(song)
