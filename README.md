@@ -4,6 +4,8 @@
 >
 > 这是一个轻量的本地音乐播放器，基于 Flask + 原生 Web 技术构建。
 
+ - 最新自动构建(未测试)：[![Build Source on App Change](https://github.com/yuexps/2FMusic/actions/workflows/build-source-on-app-change.yml/badge.svg)](https://github.com/yuexps/2FMusic/actions/workflows/build-source-on-app-change.yml)
+
 🚧 **目前项目处于早期开发阶段，功能暂不稳定，欢迎提交 PR 完善项目 或 Issue 反馈 Bug！**
 
 ---
