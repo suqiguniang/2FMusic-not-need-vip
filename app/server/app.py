@@ -866,9 +866,9 @@ def scrape_single_song(item, idx, total):
             ok_lyrics = not item['need_lyrics'] or any_has_lyrics(res_list)
             return ok_cover and ok_lyrics
 
-        # 搜索 (顺序尝试: 网易云 -> 酷狗)
+        # 搜索 (顺序尝试: QQ音乐 -> 网易云 -> 酷狗)
         results = []
-        providers = [searchx.netease, searchx.kugou]
+        providers = [searchx.qq, searchx.netease, searchx.kugou]
         
         for attempt in range(3):
             results = [] 
