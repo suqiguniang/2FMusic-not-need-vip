@@ -1,6 +1,7 @@
 name: Build Source on App Change
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'app/**'
