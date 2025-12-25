@@ -5,8 +5,6 @@ import logging
 import urllib.parse
 from functools import lru_cache
 import functools
-import asyncio
-import time
 
 if getattr(sys, 'frozen', False):
     # 【打包模式】基准目录是二进制文件所在位置
@@ -17,9 +15,7 @@ else:
     # 仅在源码模式下加载 lib
     sys.path.insert(0, os.path.join(BASE_DIR, 'lib'))
 
-import aiohttp
-from mod import textcompare, tools
-from mod.ttscn import t2s
+import requests
 from mod import textcompare, tools
 from mod.ttscn import t2s
 
@@ -70,7 +66,7 @@ def listify(obj):
         return [obj]
 
 
-async def search_artist_blur(artist_blur, limit=1):
+def search_artist_blur(artist_blur, limit=1):
     """ 由于没有选择交互的过程, 因此 artist_blur 如果输入的不准确, 可能会查询到错误的歌手 """
     # logging.info('开始搜索: ' + artist_blur)
 
@@ -83,9 +79,8 @@ async def search_artist_blur(artist_blur, limit=1):
         urllib.parse.quote(artist_blur.lower()), 100, 0, limit)
     artists = []
     try:
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(url, timeout=10) as resp:
-                response = await resp.json(content_type=None)
+        json_data_r = requests.get(url, headers=headers, timeout=10)
+        response = json_data_r.json()
 
         artist_results = response['result']
         num = int(artist_results['artistCount'])
@@ -103,11 +98,10 @@ async def search_artist_blur(artist_blur, limit=1):
     return None
 
 
-async def search_albums(artist_id):
+def search_albums(artist_id):
     url = ALBUMS_SEARCH_URL.format(artist_id)
-    async with aiohttp.ClientSession(headers=headers) as session:
-        async with session.get(url, timeout=10) as resp:
-            response = await resp.json(content_type=None)
+    json_data_r = requests.get(url, headers=headers, timeout=10)
+    response = json_data_r.json()
     if response['code'] == 200:
         return response['hotAlbums']
     return None
@@ -127,71 +121,61 @@ def filter_and_get_album_id(album_list, album):
     return most_similar['id'] if most_similar is not None else None
 
 
-async def get_album_info_by_id(album_id):
+def get_album_info_by_id(album_id):
     url = ALBUM_INFO_URL.format(album_id)
-    async with aiohttp.ClientSession(headers=headers) as session:
-        async with session.get(url, timeout=10) as resp:
-            response = await resp.json(content_type=None)
+    json_data_r = requests.get(url, headers=headers, timeout=10)
+    response = json_data_r.json()
     if response['code'] == 200:
         return response['album']
     return None
 
 
-async def get_album_info(artist, album):
+def get_album_info(artist, album):
     artist = t2s(artist)
     album = t2s(album)
     # 1. 根据 artist, 获取 artist_id
-    blur_result = await search_artist_blur(artist_blur=artist)
-    if blur_result:
+    if blur_result := search_artist_blur(artist_blur=artist):
         artist_id = blur_result['id']
-        album_list = await search_albums(artist_id)
-        if album_list:
-            album_id = filter_and_get_album_id(album_list, album)
-            if album_id:
-                return await get_album_info_by_id(album_id)
+        # 2. 根据 artist_id 查询所有专辑
+        if album_list := search_albums(artist_id):
+            # 3. 根据 album, 过滤, 并获取到 album_id
+            if album_id := filter_and_get_album_id(album_list, album):
+                # 4. 根据 album_id, 查询 album_info
+                return get_album_info_by_id(album_id)
     return None
 
 
-async def get_cover_url(album_id: int):
+def get_cover_url(album_id: int):
     url = ALBUM_SEARCH_URL_WANGYI.format(album_id)
-    async with aiohttp.ClientSession(headers=headers) as session:
-        async with session.get(url, timeout=10) as resp:
-            json_data = await resp.json(content_type=None)
+    json_data_r = requests.get(url, headers=headers, timeout=10)
+    json_data = json_data_r.json()
     if json_data.get('album', False) and json_data.get('album').get('picUrl', False):
         return json_data['album']['picUrl']
     return None
 
 
-async def get_lyrics(track_id: int):
+def get_lyrics(track_id: int):
     url = LYRIC_URL_WANGYI.format(track_id)
-    async with aiohttp.ClientSession(headers=headers) as session:
-        async with session.get(url, timeout=10) as resp:
-            json_data = await resp.json(content_type=None)
+    json_data_r = requests.get(url, headers=headers, timeout=10)
+    json_data = json_data_r.json()
     if json_data.get('lrc', False) and json_data.get('lrc').get('lyric', False):
         return json_data['lrc']['lyric']
     return None
 
 
-async def search_track(title, artist, album):
+def search_track(title, artist, album):
     result_list = []
     result_cap = 3  # 最多只返回3个
     fetch_limit = 100
     search_str = ' '.join([item for item in [title, artist, album] if item])
     url = COMMON_SEARCH_URL_WANGYI.format(urllib.parse.quote_plus(search_str), 1, 0, fetch_limit)
-    t_start = time.time()
 
-    async with aiohttp.ClientSession(headers=headers) as session:
-        async with session.get(url, timeout=10) as resp:
-            if resp.status != 200:
-                return None
-            song_info = await resp.json(content_type=None)
-    t_api = time.time()
-    print(f"[netease] 搜索API耗时: {(t_api-t_start)*1000:.1f}ms")
+    response = requests.get(url, headers=headers, timeout=10)
 
-    # 打印原始API返回内容，便于调试
-    #debug_str = json.dumps(song_info, ensure_ascii=False, indent=2)
-    #print("[netease debug] 原始API返回:", debug_str[:5000] + ("..." if len(debug_str) > 5000 else ""))
+    if response.status_code != 200:
+        return None
 
+    song_info: dict = response.json()
     try:
         song_info: list[dict] = song_info["result"]["songs"]
     except (TypeError, KeyError):
@@ -219,7 +203,6 @@ async def search_track(title, artist, album):
             song_id = song_item['id']
             album_id = album_['id'] if album_ is not None else None
             singer_id = artists[0]['id'] if artists else None
-            pic_url = album_['picUrl'] if album_ and album_.get('picUrl') else None
             candidate_songs.append(
                 {'ratio': ratio, "item": {
                     "artist": singer_name,
@@ -227,8 +210,7 @@ async def search_track(title, artist, album):
                     "title": title,
                     "artist_id": singer_id,
                     "album_id": album_id,
-                    "trace_id": song_id,
-                    "picUrl": pic_url
+                    "trace_id": song_id
                 }})
 
     candidate_songs.sort(
@@ -238,20 +220,14 @@ async def search_track(title, artist, album):
 
     candidate_songs = candidate_songs[:min(len(candidate_songs), result_cap)]
 
-    async def fetch_detail(track, ratio):
-        # 优先用 song_item['al']['picUrl']
-        t0 = time.time()
-        cover_url = track.get('picUrl')
-        t_cover = None
-        if not cover_url and track.get('album_id'):
-            t_cover_start = time.time()
-            cover_url = await get_cover_url(track['album_id'])
-            t_cover = time.time() - t_cover_start
-        t_lyric_start = time.time()
-        lyrics = await get_lyrics(track['trace_id'])
-        t_lyric = time.time() - t_lyric_start
-        t1 = time.time()
-        print(f"[netease] fetch_detail 歌曲: {track['title']} 总耗时: {(t1-t0)*1000:.1f}ms (cover:{(t_cover if t_cover is not None else 0)*1000:.1f}ms lyric:{t_lyric*1000:.1f}ms)")
+    for candidate in candidate_songs:
+        track = candidate['item']
+        ratio = candidate['ratio']
+
+        cover_url = get_cover_url(track['album_id']) if track['album_id'] else None
+        lyrics = get_lyrics(track['trace_id'])
+
+        # 结构化JSON数据
         music_json_data: dict = {
             "title": track['title'],
             "album": track['album'],
@@ -260,16 +236,13 @@ async def search_track(title, artist, album):
             "cover": cover_url,
             "id": tools.calculate_md5(f"title:{track['title']};artists:{track['artist']};album:{track['album']}", base='decstr')
         }
-        return music_json_data
-
-    tasks = [fetch_detail(candidate['item'], candidate['ratio']) for candidate in candidate_songs]
-    result_list = await asyncio.gather(*tasks)
+        result_list.append(music_json_data)
     return result_list
 
 
-async def search_artist(artist):
-    blur_result = await search_artist_blur(artist_blur=artist)
-    if blur_result:
+def search_artist(artist):
+    # 1. 根据 artist, 获取 artist_id
+    if blur_result := search_artist_blur(artist_blur=artist):
         music_json_data: dict = {
             "cover": blur_result['img1v1Url']
         }
@@ -277,9 +250,8 @@ async def search_artist(artist):
     return None
 
 
-async def search_album(artist, album):
-    album_info = await get_album_info(artist, album)
-    if album_info:
+def search_album(artist, album):
+    if album_info := get_album_info(artist, album):
         music_json_data: dict = {
             "cover": album_info['picUrl']
         }
@@ -289,7 +261,7 @@ async def search_album(artist, album):
 
 @lru_cache(maxsize=64)
 @no_error(throw=logger.info,
-          exceptions=(KeyError, IndexError, AttributeError))
+          exceptions=(requests.RequestException, KeyError, IndexError, AttributeError))
 def search(title='', artist='', album=''):
     """
     查询封面: 
@@ -314,17 +286,16 @@ def search(title='', artist='', album=''):
     album = album.strip()
 
     # 查询歌曲, 包括封面和歌词
-    t_search_start = time.time()
-    result = None
     if title:
-        result = asyncio.run(search_track(title=title, artist=artist, album=album))
+        return search_track(title=title, artist=artist, album=album)
     elif artist and album:
-        result = asyncio.run(search_album(artist, album))
+        # 只查询专辑封面
+        return search_album(artist, album)
     elif artist:
-        result = asyncio.run(search_artist(artist))
-    t_search_end = time.time()
-    print(f"[netease] search 总耗时: {(t_search_end-t_search_start)*1000:.1f}ms")
-    return result
+        # 查询艺术家封面
+        return search_artist(artist)
+    return None
+
 
 if __name__ == "__main__":
     print(search(album="十年"))

@@ -51,7 +51,7 @@ async def async_search_with_keyword(keyword, searchType=0, resultNum=50, pageNum
             resp_data = await resp.json(content_type=None)
     t_req_end = time.perf_counter()
     t_parse_end = time.perf_counter()
-    print(f"[qq_new] search_with_keyword: 网络请求耗时: {(t_req_end-t_req_start)*1000:.2f} ms, 解析耗时: {(t_parse_end-t_req_end)*1000:.2f} ms, 总耗时: {(t_parse_end-t_start)*1000:.2f} ms")
+    print(f"[qq] search_with_keyword: 网络请求耗时: {(t_req_end-t_req_start)*1000:.2f} ms, 解析耗时: {(t_parse_end-t_req_end)*1000:.2f} ms, 总耗时: {(t_parse_end-t_start)*1000:.2f} ms")
     if origin:
         return resp_data
     try:
@@ -84,7 +84,7 @@ async def async_get_song_lyric(songmid, parse=False, origin=False):
             data = await resp.json(content_type=None)
     t_req_end = time.perf_counter()
     t_parse_end = time.perf_counter()
-    print(f"[qq_new] get_song_lyric: 网络请求耗时: {(t_req_end-t_req_start)*1000:.2f} ms, 解析耗时: {(t_parse_end-t_req_end)*1000:.2f} ms, 总耗时: {(t_parse_end-t_start)*1000:.2f} ms")
+    print(f"[qq] get_song_lyric: 网络请求耗时: {(t_req_end-t_req_start)*1000:.2f} ms, 解析耗时: {(t_parse_end-t_req_end)*1000:.2f} ms, 总耗时: {(t_parse_end-t_start)*1000:.2f} ms")
     if origin:
         return data
     try:
@@ -123,12 +123,12 @@ def get_album_cover_image(albummid=None, vs=None, singer_mid=None, songmid=None)
         album_url = ALBUM_COVER_URL_QQ.format(albummid=albummid)
         if asyncio.run(async_check_album_url(album_url, timeout=0.7)):
             t_end = time.perf_counter()
-            print(f"[qq_new] get_album_cover_image: 命中album封面，总耗时: {(t_end-t_start)*1000:.2f} ms")
+            print(f"[qq] get_album_cover_image: 命中album封面，总耗时: {(t_end-t_start)*1000:.2f} ms")
             return album_url
         else:
-            print(f"[qq_new] get_album_cover_image: album封面无效，尝试vs图")
+            print(f"[qq] get_album_cover_image: album封面无效，尝试vs图")
     else:
-        print(f"[qq_new] get_album_cover_image: 无albummid，尝试vs图")
+        print(f"[qq] get_album_cover_image: 无albummid，尝试vs图")
     
     # albummid封面不可用或不存在时，再检测vs字段图片（备选方案）
     if vs and isinstance(vs, list):
@@ -160,11 +160,11 @@ def get_album_cover_image(albummid=None, vs=None, singer_mid=None, songmid=None)
             url = asyncio.run(check_vs_images(vs_urls))
             t_end = time.perf_counter()
             if url:
-                print(f"[qq_new] get_album_cover_image: 命中vs封面，总耗时: {(t_end-t_start)*1000:.2f} ms")
+                print(f"[qq] get_album_cover_image: 命中vs封面，总耗时: {(t_end-t_start)*1000:.2f} ms")
                 return url
     
     t_end = time.perf_counter()
-    print(f"[qq_new] get_album_cover_image: 未命中封面，总耗时: {(t_end-t_start)*1000:.2f} ms")
+    print(f"[qq] get_album_cover_image: 未命中封面，总耗时: {(t_end-t_start)*1000:.2f} ms")
     return None
 
 def parse_lyric(data):
@@ -213,7 +213,7 @@ def search_track(title, artist, album, max_results=3, score_threshold=0.5):
     songs = search_with_keyword(search_str, searchType=0, resultNum=10)
     t_search_end = time.perf_counter()
     if not songs or 'list' not in songs or not songs['list']:
-        print(f"[qq_new] search_track: 搜索耗时: {(t_search_end-t_start)*1000:.2f} ms (无结果)")
+        print(f"[qq] search_track: 搜索耗时: {(t_search_end-t_start)*1000:.2f} ms (无结果)")
         return []
 
     scored_items = []
@@ -245,7 +245,7 @@ def search_track(title, artist, album, max_results=3, score_threshold=0.5):
         t_lyric_start = time.perf_counter()
         lyric_data = get_song_lyric(songmid, parse=True) if songmid else ''
         t_lyric_end = time.perf_counter()
-        print(f"[qq_new] 单曲cover耗时: {(t_cover_end-t_cover_start)*1000:.2f} ms, lyric耗时: {(t_lyric_end-t_lyric_start)*1000:.2f} ms")
+        print(f"[qq] 单曲cover耗时: {(t_cover_end-t_cover_start)*1000:.2f} ms, lyric耗时: {(t_lyric_end-t_lyric_start)*1000:.2f} ms")
         if isinstance(lyric_data, dict):
             lines = []
             for item in lyric_data.get('lyric', []):
@@ -280,7 +280,7 @@ def search_track(title, artist, album, max_results=3, score_threshold=0.5):
         for future in concurrent.futures.as_completed(future_to_item):
             results.append(future.result())
     t_end = time.perf_counter()
-    print(f"[qq_new] search_track: 总耗时: {(t_end-t_start)*1000:.2f} ms")
+    print(f"[qq] search_track: 总耗时: {(t_end-t_start)*1000:.2f} ms")
     return results
 
 def search(title='', artist='', album=''):
@@ -296,6 +296,6 @@ def search(title='', artist='', album=''):
     if title:
         res = search_track(title=title, artist=artist, album=album)
         t_end = time.perf_counter()
-        print(f"[qq_new] search: 总耗时: {(t_end-t_start)*1000:.2f} ms")
+        print(f"[qq] search: 总耗时: {(t_end-t_start)*1000:.2f} ms")
         return res
     return None
