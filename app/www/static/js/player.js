@@ -1480,36 +1480,36 @@ async function checkAndFetchMetadata(track, fetchId) {
 }
 
 function parseAndRenderLyrics(lrc) {
+  // --- 双语歌词适配 ---
   state.lyricsData = [];
   if (!lrc || lrc.trim() === '') { renderNoLyrics('暂无歌词'); return; }
 
   const lines = lrc.split('\n');
-  // 更宽松的歌词解析逻辑，支持更多格式的时间戳
   const timeRegex = /\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/;
+  // Map: time(s) -> [text1, text2, ...]（支持同一时间戳多行）
+  const timeMap = new Map();
 
   lines.forEach(line => {
     line = line.trim();
     if (!line) return;
 
-    // Try parsing as NetEase JSON format first (starts with {)
+    // 解析网易云 JSON-LRC
     if (line.startsWith('{')) {
       try {
-        // Example: {"t":3000,"c":[{"tx":"制作人: "},{"tx":"King Henry"}]}
-        // Some lines might be partial or malformed, so we wrap in try-catch
-        // NOTE: Sometimes the line might have trailing comma or something, but usually it's one JSON object per line for YRC/JSON-LRC
         const json = JSON.parse(line);
         if (typeof json.t === 'number') {
-          const time = json.t / 1000; // ms to s
+          const time = json.t / 1000;
           let text = '';
           if (Array.isArray(json.c)) {
             text = json.c.map(item => item.tx || '').join('').trim();
           }
-          if (text) state.lyricsData.push({ time, text });
-          return; // Skip regex check if JSON parsed successfully
+          if (text) {
+            if (!timeMap.has(time)) timeMap.set(time, []);
+            timeMap.get(time).push(text);
+          }
+          return;
         }
-      } catch (e) {
-        // Not valid JSON, fall through to regex
-      }
+      } catch (e) {}
     }
 
     const match = timeRegex.exec(line);
@@ -1519,21 +1519,25 @@ function parseAndRenderLyrics(lrc) {
       const ms = match[3] ? parseInt(match[3]) : 0;
       const time = min * 60 + sec + (ms / (match[3] && match[3].length === 3 ? 1000 : 100));
       const text = line.replace(timeRegex, '').trim();
-      if (text) state.lyricsData.push({ time, text });
+      if (text) {
+        if (!timeMap.has(time)) timeMap.set(time, []);
+        timeMap.get(time).push(text);
+      }
     } else {
-      // 如果没有时间戳但有文本，也作为一行歌词添加
-      // Only add if it doesn't look like broken JSON AND is not a metadata tag
+      // 非时间戳行，作为0s歌词
       const isMetadata = /^\[(id|ar|ti|by|hash|al|sign|qq|total|offset|length|re|ve):.*?\]$/i.test(line);
-
       if (!line.startsWith('{') && !isMetadata) {
-        state.lyricsData.push({ time: 0, text: line });
+        if (!timeMap.has(0)) timeMap.set(0, []);
+        timeMap.get(0).push(line);
       }
     }
   });
 
-  // 如果解析后还是没有歌词行，尝试直接显示原始歌词
+  // 转为数组，按时间排序
+  state.lyricsData = Array.from(timeMap.entries()).map(([time, lines]) => ({ time, lines })).sort((a, b) => a.time - b.time);
+
+  // 没有歌词时直接显示原文
   if (state.lyricsData.length === 0) {
-    // 显示原始歌词文本
     if (ui.lyricsContainer) {
       ui.lyricsContainer.classList.remove('no-lyrics');
       ui.lyricsContainer.innerHTML = `<p class="lyric-line active">${lrc.replace(/\n/g, '<br>')}</p>`;
@@ -1541,14 +1545,17 @@ function parseAndRenderLyrics(lrc) {
     return;
   }
 
+  // 渲染：每个时间戳一行，支持多行（原文+翻译）
   if (ui.lyricsContainer) {
     ui.lyricsContainer.classList.remove('no-lyrics');
     ui.lyricsContainer.innerHTML = state.lyricsData.map((l, i) =>
-      `<p class="lyric-line" data-index="${i}" data-time="${l.time}">${l.text}</p>`
+      `<p class="lyric-line" data-index="${i}" data-time="${l.time}">
+        ${l.lines.map((txt, idx) => `<span class="lyric-${idx === 0 ? 'main' : 'trans'}">${txt}</span>`).join('<br>')}
+      </p>`
     ).join('');
     ui.lyricsContainer.querySelectorAll('.lyric-line').forEach(line => {
       line.addEventListener('click', (e) => {
-        const time = parseFloat(e.target.getAttribute('data-time'));
+        const time = parseFloat(e.currentTarget.getAttribute('data-time'));
         if (!isNaN(time) && ui.audio.duration) {
           ui.audio.currentTime = time;
           if (state.isPlaying) ui.audio.play();

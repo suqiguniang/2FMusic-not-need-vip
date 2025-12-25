@@ -171,16 +171,31 @@ async def get_lyrics(track_id: int):
     origin_lyric = json_data.get('lrc', {}).get('lyric', '')
     trans_lyric = json_data.get('tlyric', {}).get('lyric', '')
     has_translation = bool(trans_lyric.strip())
-    # 生成双语歌词（与QQ逻辑一致）
+    # 解析歌词为 {timestamp: text}
+    def parse_lrc(lrc_text):
+        lrc_dict = {}
+        for line in lrc_text.splitlines():
+            matches = list(re.finditer(r'\[(\d{2}:\d{2}\.\d{2,3})\]', line))
+            if not matches:
+                continue
+            text = re.sub(r'(\[\d{2}:\d{2}\.\d{2,3}\])+', '', line).strip()
+            for m in matches:
+                ts = m.group(1)
+                lrc_dict[ts] = text
+        return lrc_dict
+
     if has_translation:
-        # 简单按行对齐，若行数不同则只拼接有的部分
-        origin_lines = origin_lyric.splitlines()
-        trans_lines = trans_lyric.splitlines()
+        origin_dict = parse_lrc(origin_lyric)
+        trans_dict = parse_lrc(trans_lyric)
+        # 合并所有时间戳，按时间排序
+        all_timestamps = sorted(set(origin_dict.keys()) | set(trans_dict.keys()),
+                                key=lambda x: [int(i) if i.isdigit() else float(i) for i in re.split('[:.]', x)])
         bilingual_lines = []
-        for i, line in enumerate(origin_lines):
-            bilingual_lines.append(line)
-            if i < len(trans_lines):
-                bilingual_lines.append(trans_lines[i])
+        for ts in all_timestamps:
+            if ts in origin_dict and origin_dict[ts]:
+                bilingual_lines.append(f'[{ts}]{origin_dict[ts]}')
+            if ts in trans_dict and trans_dict[ts]:
+                bilingual_lines.append(f'[{ts}]{trans_dict[ts]}')
         return '\n'.join(bilingual_lines), has_translation
     return origin_lyric, False
 
