@@ -134,7 +134,7 @@ def get_lyrics(track_id: int):
 
 def search_track(title, artist, album):
     result_list = []
-    result_cap = 10
+    result_cap = 3  # 最多只返回3个
     fetch_limit = 100
     search_str = ' '.join([item for item in [title, artist, album] if item])
     url = COMMON_SEARCH_URL_WANGYI.format(urllib.parse.quote_plus(search_str), 1, 0, fetch_limit)

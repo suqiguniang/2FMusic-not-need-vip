@@ -5,7 +5,7 @@ from mod.searchx import qq_new
 
 if __name__ == "__main__":
     # 测试：搜索歌曲“可能”，歌手“程响”
-    result = qq_new.search(title="可能", artist="程响")
+    result = qq_new.search(title="日不落", artist="蔡依林")
     print("搜索结果：")
     for item in result:
         print(f"标题: {item['title']}")

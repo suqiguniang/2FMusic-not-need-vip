@@ -4,7 +4,7 @@
 >
 > 这是一个轻量的本地音乐播放器，基于 Flask + 原生 Web 技术构建。
 
- - 最新自动构建(未测试)：[![Build Source on App Change](https://github.com/yuexps/2FMusic/actions/workflows/build-source-on-app-change.yml/badge.svg)](https://github.com/yuexps/2FMusic/actions/workflows/build-source-on-app-change.yml)
+ - 最新构建(未测试)：[![Build Source on App Change](https://github.com/yuexps/2FMusic/actions/workflows/build-source-on-app-change.yml/badge.svg)](https://github.com/yuexps/2FMusic/actions/workflows/build-source-on-app-change.yml)
 
 🚧 **目前项目处于早期开发阶段，功能暂不稳定，欢迎提交 PR 完善项目 或 Issue 反馈 Bug！**
 
@@ -14,8 +14,8 @@
 
 *   **🎧 本地音乐库**
     *   自动扫描并管理上传的音乐文件。
-    *   支持识别 ID3 内嵌元数据（支持封面、歌词）。
-    *   支持通过 网易云、酷狗、咪咕 获取封面、歌词。
+    *   支持识别 ID3 内嵌元数据（封面、歌词）。
+    *   支持通过 网络源 自动获取封面、歌词。
 *   **📱 沉浸式播放器**
     *   **响应式 UI**：PC Web端 提供原生 App 般的流畅体验。
     *   **动态视觉**：支持歌词滚动显示、根据封面自动提取主题色。
