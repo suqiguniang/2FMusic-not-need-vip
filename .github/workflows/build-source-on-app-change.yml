@@ -36,7 +36,7 @@ jobs:
 
       - name: Prepare fnpack
         run: |
-          cp ./fnpack-1.0.4-linux-amd64 ./fnpack
+          cp public/fnpack-1.0.4-linux-amd64 ./fnpack
           chmod +x ./fnpack
 
       - name: Extract Version from Manifest
@@ -51,7 +51,7 @@ jobs:
         id: build_source
         run: |
           echo "📦 Building Source (Python) Package..."
-          fnpack build
+          ./fnpack build
           SOURCE_FPK_NAME="2fmusic-${{ steps.version.outputs.version }}-python.fpk"
           if [ -f "2fmusic.fpk" ]; then
             mv 2fmusic.fpk "$SOURCE_FPK_NAME"
