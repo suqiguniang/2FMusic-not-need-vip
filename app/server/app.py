@@ -873,8 +873,8 @@ def scrape_single_song(item, idx, total):
             return ok_cover and ok_lyrics
 
         # 搜索 (全部获取: QQ音乐 -> 网易云 -> 酷狗)
-        result = mod.search_all(title=song['title'], artist=song['artist'], album=song['album'])
-        if not result:
+        results = mod.search_all(title=song['title'], artist=song['artist'], album=song['album'])
+        if not results:
             with scan_status_lock:
                 SCAN_STATUS['failed'] = SCAN_STATUS.get('failed', 0) + 1
             return
