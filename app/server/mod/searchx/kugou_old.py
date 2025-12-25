@@ -154,6 +154,3 @@ def search(title='', artist='', album=''):
         
     sort_li: list[dict] = sorted(result_list, key=lambda x: x['ratio'], reverse=True)
     return [i.get('data') for i in sort_li]
-
-if __name__ == "__main__":
-    print(search(album="十年"))

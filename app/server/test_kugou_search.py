@@ -1,8 +1,8 @@
-from mod.searchx import qq
+from mod.searchx import kugou
 
 if __name__ == "__main__":
     # 测试：搜索歌曲“可能”，歌手“程响”
-    result = qq.search(title="可能", artist="程响", album="")
+    result = kugou.search(title="沙漠骆驼", artist="", album="")
     print("搜索结果：")
     for item in result:
         print(f"标题: {item['title']}")

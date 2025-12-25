@@ -1,8 +1,8 @@
-from mod.searchx import netease, netease_test
+from mod.searchx import netease
 
 if __name__ == "__main__":
     # 测试：搜索歌曲“可能”，歌手“程响”
-    result = netease_test.search(title="可能", artist="程响", album="")
+    result = netease.search(title="可能", artist="程响", album="")
     print("搜索结果：")
     for item in result:
         print(f"标题: {item['title']}")
@@ -10,5 +10,10 @@ if __name__ == "__main__":
         print(f"专辑: {item['album']}")
         print(f"封面: {item['cover']}")
         #print(f"歌词: {item['lyrics']}" if item['lyrics'] else "歌词: 无")
+        if item['lyrics']:
+            lrc = item['lyrics']
+            print(f"歌词: {lrc[:20]}{'...' if len(lrc) > 20 else ''}")
+        else:
+            print("歌词: 无")
         print(f"ID: {item['id']}")
         print('-'*40)

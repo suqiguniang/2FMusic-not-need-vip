@@ -326,6 +326,3 @@ def search(title='', artist='', album=''):
     print(f"[netease] search 总耗时: {(t_search_end-t_search_start)*1000:.1f}ms")
     return result
 
-if __name__ == "__main__":
-    print(search(album="十年"))
-

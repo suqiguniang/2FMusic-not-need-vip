@@ -1,13 +1,11 @@
 import os
 import sys
-import json
 import base64
-import random
-import string
 import time
 import logging
 from functools import lru_cache
 import functools
+import asyncio
 
 if getattr(sys, 'frozen', False):
     # 【打包模式】基准目录是二进制文件所在位置
@@ -18,9 +16,9 @@ else:
     # 仅在源码模式下加载 lib
     sys.path.insert(0, os.path.join(BASE_DIR, 'lib'))
 
-import requests
 from mod import textcompare
 from mod import tools
+import aiohttp
 
 # 工具函数
 def no_error(throw=None, exceptions=(Exception,)):
@@ -47,113 +45,101 @@ headers: dict = {'User-Agent': '{"percent": 21.4, "useragent": "Mozilla/5.0 (Win
                          '116.0 Win10", "browser": "chrome", "version": 116.0, "os": "win10"}', }
 logger = logging.getLogger(__name__)
 
-
-def get_cover(m_hash: str, m_id: int|str) -> str:
-    def _dfid(num):
-        random_str = ''.join(random.sample((string.ascii_letters + string.digits), num))
-        return random_str
-
-    # 获取a-z  0-9组成的随机23位数列
-    def _mid(num):
-        random_str = ''.join(random.sample((string.ascii_letters[:26] + string.digits), num))
-        return random_str
-
-    music_url = 'https://wwwapi.kugou.com/yy/index.php'
-    parameter = {
-        'r': 'play/getdata',
-        'hash': m_hash,
-        'dfid': _dfid(23),
-        'mid': _mid(23),
-        'album_id': m_id,
-        '_': str(round(time.time() * 1000))  # 时间戳
-    }
-    try:
-        session = tools.get_legacy_session()
-        json_data_r = session.get(music_url, headers=headers, params=parameter, timeout=10)
-        json_data = json_data_r.json()
-        if json_data.get("data"):
-            return json_data['data'].get("img")
-    except Exception as e:
-        logger.warning(f"Kugou get_cover failed: {e}")
-    return ""
-
-
-def search(title='', artist='', album=''):
-    # 确保参数为字符串
+async def search_async(title='', artist='', album=''):
+    time_start = time.time()
+    # 新API：songsearch.kugou.com/song_search_v2
     title = str(title) if title else ''
     artist = str(artist) if artist else ''
     album = str(album) if album else ''
-    
     if not any((title, artist, album)):
         return None
-        
     keyword = f'{title} {artist} {album}'.strip()
     result_list = []
     limit = 3
-    
     try:
-        session = tools.get_legacy_session()
-        response = session.get(
-            f"http://mobilecdn.kugou.com/api/v3/search/song?format=json&keyword={' '.join([item for item in [title, artist, album] if item])}&page=1&pagesize=2&showtype=1",
-            headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            song_info: dict = response.json()
-            song_info: list[dict] = song_info["data"]["info"]
-            if len(song_info) >= 1:
-                for song_item in song_info:
-                    song_name = song_item["songname"]
-                    singer_name = song_item.get("singername", "")
-                    song_hash = song_item["hash"]
-                    album_id = song_item["album_id"]
-                    album_name = song_item.get("album_name", "")
-                    title_conform_ratio = textcompare.association(title, song_name)
-                    artist_conform_ratio = textcompare.assoc_artists(artist, singer_name)
-                    ratio: float = (title_conform_ratio * (artist_conform_ratio+1)/2) ** 0.5
-                    if ratio >= 0.2:
-                        try:
-                            response2 = session.get(
-                                f"https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&keyword=&duration=&hash={song_hash}&album_audio_id=",
-                                headers=headers, timeout=10)
-                            lyrics_info = response2.json()
-                            if not lyrics_info["candidates"]:
-                                continue
-                            lyrics_id = lyrics_info["candidates"][0]["id"]
-                            lyrics_key = lyrics_info["candidates"][0]["accesskey"]
-                            
-                            # 第三层Json，要求获得并解码Base64
-                            response3 = session.get(
-                                f"http://lyrics.kugou.com/download?ver=1&client=pc&id={lyrics_id}&accesskey={lyrics_key}&fmt=lrc&charset=utf8",
-                                headers=headers, timeout=10)
-                            lyrics_data = response3.json()
-                            lyrics_encode = lyrics_data["content"]  # 这里是Base64编码的数据
-                            lrc_text = tools.standard_lrc(base64.b64decode(lyrics_encode).decode('utf-8'))  # 这里解码
-                            # 结构化JSON数据
-                            music_json_data: dict = {
-                                "title": song_name,
-                                "album": album_name,
-                                "artist": singer_name,
-                                "lyrics": lrc_text,
-                                "cover": get_cover(song_hash, album_id),
-                                "id": tools.calculate_md5(f"title:{song_name};artists:{singer_name};album:{album_name}", base='decstr')
-                            }
-                            result_list.append({
-                                "data": music_json_data,
-                                "ratio": ratio
-                            })
-                            if len(result_list) > limit:
-                                break
-                        except Exception as e:
-                            logger.warning(f"Kugou lyric fetch error: {e}")
-                            continue
-        else:
-            return None
+        async with aiohttp.ClientSession(headers=headers) as session:
+            url = f"https://songsearch.kugou.com/song_search_v2?keyword={keyword}&platform=WebFilter&format=json&page=1&pagesize=10"
+            async with session.get(url, timeout=10) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json(content_type=None)
+            song_list = data.get('data', {}).get('lists', [])
+            # 先只做基础信息和相似度计算
+            for song_item in song_list:
+                song_name = song_item.get('SongName', '')
+                singer_name = song_item.get('SingerName', '')
+                album_name = song_item.get('AlbumName', '')
+                file_hash = song_item.get('FileHash', '')
+                album_audio_id = song_item.get('Audioid', '')
+                title_conform_ratio = textcompare.association(title, song_name)
+                artist_conform_ratio = textcompare.assoc_artists(artist, singer_name)
+                ratio = (title_conform_ratio * (artist_conform_ratio+1)/2) ** 0.5
+                result_list.append({
+                    "song_item": song_item,
+                    "file_hash": file_hash,
+                    "album_audio_id": album_audio_id,
+                    "ratio": ratio
+                })
+            # 排序后只处理前3首
+            sort_li = sorted(result_list, key=lambda x: x['ratio'], reverse=True)[:limit]
+            final_results = []
+            for entry in sort_li:
+                song_item = entry["song_item"]
+                song_name = song_item.get('SongName', '')
+                singer_name = song_item.get('SingerName', '')
+                album_name = song_item.get('AlbumName', '')
+                cover_url = song_item.get('Image', '').replace('{size}', '400') if song_item.get('Image') else ''
+                # 封面获取耗时检测
+                cover_time_start = time.time()
+                # cover_url 已直接从 song_item 获取，如需后续异步获取可在此处加耗时统计
+                cover_time_end = time.time()
+                print(f"[kugou] cover 获取: {round((cover_time_end - cover_time_start) * 1000)} ms [{song_name}]")
+
+                lrc_text = ""
+                try:
+                    lyric_time_start = time.time()
+                    file_hash = entry["file_hash"]
+                    album_audio_id = entry["album_audio_id"]
+                    # 歌词第一步
+                    url2 = f"https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&keyword=&duration=&hash={file_hash}&album_audio_id={album_audio_id}"
+                    async with session.get(url2, timeout=10) as resp2:
+                        lyrics_info = await resp2.json(content_type=None)
+                    if lyrics_info.get("candidates"):
+                        lyrics_id = lyrics_info["candidates"][0]["id"]
+                        lyrics_key = lyrics_info["candidates"][0]["accesskey"]
+                        # 歌词第二步
+                        url3 = f"http://lyrics.kugou.com/download?ver=1&client=pc&id={lyrics_id}&accesskey={lyrics_key}&fmt=lrc&charset=utf8"
+                        async with session.get(url3, timeout=10) as resp3:
+                            lyrics_data = await resp3.json(content_type=None)
+                        lyrics_encode = lyrics_data.get("content", "")
+                        if lyrics_encode:
+                            lrc_text = tools.standard_lrc(base64.b64decode(lyrics_encode).decode('utf-8'))
+                    lyric_time_end = time.time()
+                    print(f"[kugou] 歌词获取: {round((lyric_time_end - lyric_time_start) * 1000)} ms [{song_name}]")
+                except Exception as e:
+                    print(f"[kugou] 歌词获取错误: {e}")
+                music_json_data = {
+                    "title": song_name,
+                    "album": album_name,
+                    "artist": singer_name,
+                    "cover": cover_url,
+                    "lyrics": lrc_text,
+                    "id": tools.calculate_md5(f"title:{song_name};artists:{singer_name};album:{album_name}", base='decstr')
+                }
+                final_results.append(music_json_data)
+            return final_results
     except Exception as e:
         logger.error(f"Kugou search error: {e}")
         return None
-        
-    sort_li: list[dict] = sorted(result_list, key=lambda x: x['ratio'], reverse=True)
-    return [i.get('data') for i in sort_li]
+    sort_li = sorted(result_list, key=lambda x: x['ratio'], reverse=True)
+    time_end = time.time()
+    print(f"[kugou] search_async: {round((time_end - time_start) * 1000)} ms")
+    return [i.get('data') for i in sort_li[:limit]]
 
-if __name__ == "__main__":
-    print(search(album="十年"))
+# 同步包装器
+def search(*args, **kwargs):
+    time_start = time.time()
+    result = asyncio.run(search_async(*args, **kwargs))
+    time_end = time.time()
+    print(f"[kugou] search 总耗时: {round((time_end - time_start) * 1000)} ms")
+    return result
