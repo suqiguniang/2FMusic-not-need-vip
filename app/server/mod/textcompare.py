@@ -1,3 +1,5 @@
+#原始项目地址：https://github.com/HisAtri/LrcApi
+
 import re
 from mod.ttscn import t2s
 

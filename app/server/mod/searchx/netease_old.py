@@ -1,3 +1,5 @@
+#原始项目地址：https://github.com/HisAtri/LrcApi
+
 import os
 import sys
 import json

@@ -171,33 +171,35 @@ async def get_lyrics(track_id: int):
     origin_lyric = json_data.get('lrc', {}).get('lyric', '')
     trans_lyric = json_data.get('tlyric', {}).get('lyric', '')
     has_translation = bool(trans_lyric.strip())
-    # 解析歌词为 {timestamp: text}
-    def parse_lrc(lrc_text):
-        lrc_dict = {}
+
+    # 解析歌词为 [(timestamp, text)]，保留顺序和重复时间戳
+    def parse_lrc_lines(lrc_text):
+        result = []
         for line in lrc_text.splitlines():
             matches = list(re.finditer(r'\[(\d{2}:\d{2}\.\d{2,3})\]', line))
-            if not matches:
-                continue
-            text = re.sub(r'(\[\d{2}:\d{2}\.\d{2,3}\])+', '', line).strip()
-            for m in matches:
-                ts = m.group(1)
-                lrc_dict[ts] = text
-        return lrc_dict
+            content = re.sub(r'(\[\d{2}:\d{2}\.\d{2,3}\])+', '', line).strip()
+            if matches and content:
+                for m in matches:
+                    ts = m.group(1)
+                    result.append((ts, content))
+        return result
 
-    if has_translation:
-        origin_dict = parse_lrc(origin_lyric)
-        trans_dict = parse_lrc(trans_lyric)
-        # 合并所有时间戳，按时间排序
-        all_timestamps = sorted(set(origin_dict.keys()) | set(trans_dict.keys()),
-                                key=lambda x: [int(i) if i.isdigit() else float(i) for i in re.split('[:.]', x)])
-        bilingual_lines = []
-        for ts in all_timestamps:
-            if ts in origin_dict and origin_dict[ts]:
-                bilingual_lines.append(f'[{ts}]{origin_dict[ts]}')
-            if ts in trans_dict and trans_dict[ts]:
-                bilingual_lines.append(f'[{ts}]{trans_dict[ts]}')
-        return '\n'.join(bilingual_lines), has_translation
-    return origin_lyric, False
+    origin_list = parse_lrc_lines(origin_lyric)
+    trans_list = parse_lrc_lines(trans_lyric) if has_translation else []
+
+    # 合并原文和翻译，按时间戳顺序，原文在前，翻译在后
+    merged = []
+    i, j = 0, 0
+    while i < len(origin_list) or j < len(trans_list):
+        if i < len(origin_list) and (j >= len(trans_list) or origin_list[i][0] <= trans_list[j][0]):
+            merged.append(f'[{origin_list[i][0]}]{origin_list[i][1]}')
+            i += 1
+        elif j < len(trans_list):
+            merged.append(f'[{trans_list[j][0]}]{trans_list[j][1]}')
+            j += 1
+
+    merged_lyric = '\n'.join(merged)
+    return merged_lyric, has_translation
 
 
 async def search_track(title, artist, album):

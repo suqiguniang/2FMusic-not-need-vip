@@ -258,7 +258,7 @@ def search_track(title, artist, album, max_results=3, score_threshold=0.5):
 
         has_translation = False
         if isinstance(lyric_data, dict):
-            # 收集所有时间戳，按时间戳升序输出原文和译文
+            # 支持同一时间戳下多行原文和译文，避免内容丢失
             time_map = {}
             for item in lyric_data.get('lyric', []):
                 time_tag = item.get('time', '')
@@ -266,15 +266,14 @@ def search_track(title, artist, album, max_results=3, score_threshold=0.5):
                 trans_line = item.get('trans', '')
                 if time_tag:
                     if time_tag not in time_map:
-                        time_map[time_tag] = {'lyric': '', 'trans': ''}
+                        time_map[time_tag] = {'lyric': [], 'trans': []}
                     if lyric_line:
-                        time_map[time_tag]['lyric'] = lyric_line
+                        time_map[time_tag]['lyric'].append(lyric_line)
                     if trans_line:
-                        time_map[time_tag]['trans'] = trans_line
+                        time_map[time_tag]['trans'].append(trans_line)
                         has_translation = True
             # 按时间戳排序输出
             def time_key(ts):
-                # 支持00:00.00或00:00.000，异常内容排最后
                 try:
                     parts = ts.split(':')
                     if len(parts) == 2:
@@ -289,13 +288,16 @@ def search_track(title, artist, album, max_results=3, score_threshold=0.5):
                     return float('inf')
             lines = []
             for ts in sorted(time_map.keys(), key=time_key):
-                lyric_line = time_map[ts]['lyric'].strip()
-                trans_line = time_map[ts]['trans'].strip()
-                # 过滤内容为'//'或空白的行
-                if lyric_line and lyric_line != '//':
-                    lines.append(f'[{ts}]{lyric_line}')
-                if trans_line and trans_line != '//':
-                    lines.append(f'[{ts}]{trans_line}')
+                # 原文多行
+                for lyric_line in time_map[ts]['lyric']:
+                    lyric_line = lyric_line.strip()
+                    if lyric_line and lyric_line != '//':
+                        lines.append(f'[{ts}]{lyric_line}')
+                # 译文多行
+                for trans_line in time_map[ts]['trans']:
+                    trans_line = trans_line.strip()
+                    if trans_line and trans_line != '//':
+                        lines.append(f'[{ts}]{trans_line}')
             lyrics = '\n'.join(lines)
         else:
             lyrics = lyric_data or ''
