@@ -9,7 +9,6 @@ API_BONUS = {'qq': 0.01, 'netease': 0.005, 'kugou': 0.0}  # API权重加分
 def search_song_best(title, artist, album):
     """
     并发搜索三大平台，返回最优匹配结果（dict），无则返回None。
-    同时支持聚合排序、翻译标记、权重加分、详细输出。
     """
     def search_api(api_func, title, artist, album, result_list, source, cost_list):
         start = time.perf_counter()
@@ -146,6 +145,5 @@ def search_song_best(title, artist, album):
     cost_msgs.append(f"\n[search_util] 最优结果: API={best.get('source')} 标题={best.get('title')} 歌手={best.get('artist')} 专辑={best.get('album')} 封面={best.get('cover')} 歌词预览={lyrics_preview}{trans_mark}")
     cost_msgs.append("\nAPI 耗时统计：")
     cost_msgs.extend(api_costs)
-    cost_msgs.append("\n[search_util] 返回数据：")
     print("\n".join(cost_msgs))
     return best
