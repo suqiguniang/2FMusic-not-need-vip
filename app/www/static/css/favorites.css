@@ -986,7 +986,6 @@
     transform: scale(1);
   }
 }
-}
 
 .song-card.selected {
   border: 2px solid var(--primary);
@@ -997,3 +996,5 @@
   position: relative;
   transition: all 0.2s ease;
 }
+
+

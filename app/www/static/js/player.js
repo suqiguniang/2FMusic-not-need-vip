@@ -5,6 +5,8 @@ import { showToast, showConfirmDialog, hideProgressToast, updateDetailFavButton,
 import { startScanPolling, loadMountPoints } from './mounts.js';
 import { showPlaylistSelectDialog, loadPlaylistFilter, handlePlaylistFilterChange, showCreatePlaylistDialog, clearPlaylistCache } from './favorites.js';
 import { batchManager } from './batch-manager.js';
+import { renderArtistAggregateView } from './artist-aggregate.js';
+import { openQueueModal } from './queue-manager.js';
 
 // 收藏功能相关函数已部分移至 favorites.js
 
@@ -134,6 +136,11 @@ function releaseWakeLock() {
 }
 
 export async function loadSongs(retry = true, initPlayer = true) {
+  // 初始化排序顺序：如果未设置过或排序顺序与该排序方式的默认值不符，则使用默认值
+  if (!state.savedState.sortOrder || state.savedState.sortOrder !== getDefaultSortOrder(state.currentSort)) {
+    state.sortOrder = getDefaultSortOrder(state.currentSort);
+  }
+
   // 1. 优先使用缓存显示 (SWR)
   if (state.fullPlaylist.length > 0 && state.playQueue.length === 0) {
     state.playQueue = [...state.fullPlaylist];
@@ -293,42 +300,77 @@ let isRendering = false;
 
 // 排序状态使用state对象管理，已移至state.js
 
+// 排序配置
+const SORT_CONFIG = {
+  title: { label: '标题', icon: 'fa-sort-alpha-down' },
+  artist: { label: '歌手', icon: 'fa-user' },
+  album: { label: '专辑', icon: 'fa-compact-disc' },
+  mtime: { label: '时间', icon: 'fa-clock', defaultOrder: 'desc' }, // 默认由新到旧
+  size: { label: '大小', icon: 'fa-database', defaultOrder: 'desc' } // 默认由大到小
+};
+
+// 获取排序方式的默认顺序
+function getDefaultSortOrder(sortType) {
+  return (SORT_CONFIG[sortType] && SORT_CONFIG[sortType].defaultOrder) || 'asc';
+}
+
+// 通用排序函数 - 提取重复的排序逻辑
+function sortSongs(songs, sortType = state.currentSort, sortOrder = state.sortOrder) {
+  return [...songs].sort((a, b) => {
+    let valueA, valueB;
+
+    switch (sortType) {
+      case 'title':
+        valueA = (a.title || '').toLowerCase();
+        valueB = (b.title || '').toLowerCase();
+        break;
+      case 'artist':
+        valueA = (a.artist || '').toLowerCase();
+        valueB = (b.artist || '').toLowerCase();
+        break;
+      case 'album':
+        valueA = (a.album || '').toLowerCase();
+        valueB = (b.album || '').toLowerCase();
+        break;
+      case 'mtime':
+        valueA = a.mtime || 0;
+        valueB = b.mtime || 0;
+        break;
+      case 'size':
+        valueA = a.size || 0;
+        valueB = b.size || 0;
+        break;
+      default:
+        valueA = (a.title || '').toLowerCase();
+        valueB = (b.title || '').toLowerCase();
+    }
+
+    if (valueA < valueB) return sortOrder === 'asc' ? -1 : 1;
+    if (valueA > valueB) return sortOrder === 'asc' ? 1 : -1;
+    return 0;
+  });
+}
+
 // 更新排序按钮显示
 function updateSortButton() {
   if (!ui.btnSort) return;
 
   // 获取当前排序类型的文本
-  let sortText = '标题';
-  switch (state.currentSort) {
-    case 'title':
-      sortText = '标题';
-      break;
-    case 'artist':
-      sortText = '歌手';
-      break;
-    case 'album':
-      sortText = '专辑';
-      break;
-    case 'mtime':
-      sortText = '时间';
-      break;
-  }
+  const sortConfig = SORT_CONFIG[state.currentSort];
+  const sortText = sortConfig ? sortConfig.label : '标题';
+  const sortIcon = sortConfig ? sortConfig.icon : 'fa-sort-alpha-down';
 
   // 更新按钮文本
   ui.btnSort.innerHTML = `
-    <i class="fas fa-sort"></i> ${sortText}
+    <i class="fas ${sortIcon}"></i> ${sortText}
   `;
 
   // 更新排序选项的活动状态
   document.querySelectorAll('.sort-option').forEach(option => {
-    option.classList.remove('active');
     if (option.dataset.sort === state.currentSort) {
       option.classList.add('active');
-      // 更新排序顺序图标
-      const icon = option.querySelector('.sort-order');
-      if (icon) {
-        icon.className = `fas ${state.sortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down'}`;
-      }
+    } else {
+      option.classList.remove('active');
     }
   });
 }
@@ -385,35 +427,15 @@ export function renderPlaylist() {
 
     // 应用排序：只在本地音乐页面使用
     if (state.currentTab === 'local') {
-      filteredSongs.sort((a, b) => {
-        let valueA, valueB;
-
-        switch (state.currentSort) {
-          case 'title':
-            valueA = (a.title || '').toLowerCase();
-            valueB = (b.title || '').toLowerCase();
-            break;
-          case 'artist':
-            valueA = (a.artist || '').toLowerCase();
-            valueB = (b.artist || '').toLowerCase();
-            break;
-          case 'album':
-            valueA = (a.album || '').toLowerCase();
-            valueB = (b.album || '').toLowerCase();
-            break;
-          case 'mtime':
-            valueA = a.mtime || 0;
-            valueB = b.mtime || 0;
-            break;
-          default:
-            valueA = (a.title || '').toLowerCase();
-            valueB = (b.title || '').toLowerCase();
-        }
-
-        if (valueA < valueB) return state.sortOrder === 'asc' ? -1 : 1;
-        if (valueA > valueB) return state.sortOrder === 'asc' ? 1 : -1;
-        return 0;
-      });
+      filteredSongs = sortSongs(filteredSongs);
+      
+      // 如果是歌手排序，使用聚合视图
+      if (state.currentSort === 'artist') {
+        state.displayPlaylist = filteredSongs;
+        renderArtistAggregateView(filteredSongs, playTrack);
+        isRendering = false;
+        return;
+      }
     }
 
     state.displayPlaylist = filteredSongs;
@@ -952,35 +974,7 @@ function renderPlaylistSongs(songs) {
   songListContainer.innerHTML = '';
 
   // 应用排序
-  const sortedSongs = [...songs].sort((a, b) => {
-    let valueA, valueB;
-
-    switch (state.currentSort) {
-      case 'title':
-        valueA = (a.title || '').toLowerCase();
-        valueB = (b.title || '').toLowerCase();
-        break;
-      case 'artist':
-        valueA = (a.artist || '').toLowerCase();
-        valueB = (b.artist || '').toLowerCase();
-        break;
-      case 'album':
-        valueA = (a.album || '').toLowerCase();
-        valueB = (b.album || '').toLowerCase();
-        break;
-      case 'mtime':
-        valueA = a.mtime || 0;
-        valueB = b.mtime || 0;
-        break;
-      default:
-        valueA = (a.title || '').toLowerCase();
-        valueB = (b.title || '').toLowerCase();
-    }
-
-    if (valueA < valueB) return state.sortOrder === 'asc' ? -1 : 1;
-    if (valueA > valueB) return state.sortOrder === 'asc' ? 1 : -1;
-    return 0;
-  });
+  const sortedSongs = sortSongs(songs);
 
   if (sortedSongs.length === 0) {
     songListContainer.innerHTML = `<div class="loading-text" style="grid-column: 1/-1; padding: 4rem 0; font-size: 1.1rem; opacity: 0.6;">没有找到匹配的歌曲</div>`;
@@ -1756,6 +1750,11 @@ export function bindUiControls() {
     });
   }
 
+  // 队列按钮
+  if (ui.btnQueue) {
+    ui.btnQueue.addEventListener('click', openQueueModal);
+  }
+
   // 点击外部关闭排序下拉菜单
   document.addEventListener('click', (e) => {
     if (!ui.btnSort?.contains(e.target) && !ui.sortDropdown?.contains(e.target)) {
@@ -1768,14 +1767,9 @@ export function bindUiControls() {
     option.addEventListener('click', (e) => {
       e.stopPropagation();
       const sortType = option.dataset.sort;
-      if (sortType === state.currentSort) {
-        // 切换排序顺序
-        state.sortOrder = state.sortOrder === 'asc' ? 'desc' : 'asc';
-      } else {
-        // 更改排序类型
-        state.currentSort = sortType;
-        state.sortOrder = 'asc';
-      }
+      // 更改排序类型，使用该排序方式的默认顺序
+      state.currentSort = sortType;
+      state.sortOrder = getDefaultSortOrder(sortType);
 
       // 保存排序状态到localStorage
       persistState(ui.audio, { currentSort: state.currentSort, sortOrder: state.sortOrder });
@@ -1874,6 +1868,21 @@ export function bindUiControls() {
   });
   [ui.actionMenuOverlay, ui.confirmModalOverlay].forEach(overlay => {
     overlay?.addEventListener('click', (e) => { if (e.target === overlay) { overlay.classList.remove('active'); state.currentConfirmAction = null; } });
+  });
+
+  // 队列项点击事件
+  window.addEventListener('queueItemClick', (e) => {
+    const index = e.detail.index;
+    // 关闭队列模态框
+    const queueModalOverlay = document.querySelector('.queue-modal-overlay');
+    if (queueModalOverlay) {
+      queueModalOverlay.classList.add('closing');
+      setTimeout(() => {
+        queueModalOverlay.remove();
+      }, 300);
+    }
+    // 播放选中的歌曲
+    playTrack(index);
   });
 
   // Real-time Favorite Sync

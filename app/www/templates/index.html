@@ -47,6 +47,8 @@
     <link rel="stylesheet" href="{{ 'css/font-awesome/all.min.css' | static_url }}">
     <link rel="stylesheet" href="{{ 'css/style.css' | static_url }}">
     <link rel="stylesheet" href="{{ 'css/favorites.css' | static_url }}">
+    <link rel="stylesheet" href="{{ 'css/artist-aggregate.css' | static_url }}">
+    <link rel="stylesheet" href="{{ 'css/queue-manager.css' | static_url }}">
 </head>
 
 <body>
@@ -109,6 +111,9 @@
                                     </div>
                                     <div class="sort-option" data-sort="album">
                                         <i class="fas fa-compact-disc"></i> 音乐专辑
+                                    </div>
+                                    <div class="sort-option" data-sort="size">
+                                        <i class="fas fa-database"></i> 文件大小
                                     </div>
                                     <div class="sort-option" data-sort="mtime">
                                         <i class="fas fa-clock"></i> 入库时间
@@ -395,6 +400,9 @@
             </div>
 
             <div class="player-extra">
+                <button class="icon-btn" id="btn-queue" style="width: 2rem; text-align: center;" title="播放队列">
+                    <i class="fas fa-list"></i>
+                </button>
                 <button class="icon-btn" id="btn-mute" style="width: 2rem; text-align: center;">
                     <i class="fas fa-volume-up" id="vol-icon"></i>
                 </button>

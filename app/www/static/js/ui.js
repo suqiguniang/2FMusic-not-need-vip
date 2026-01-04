@@ -116,6 +116,7 @@ export const ui = {
   fpBtnMode: document.getElementById('fp-btn-mode'),
   fpBtnFav: document.getElementById('fp-btn-fav'),
   btnMute: document.getElementById('btn-mute'),
+  btnQueue: document.getElementById('btn-queue'),
   volIcon: document.getElementById('vol-icon'),
   mobileMiniPlay: document.getElementById('mobile-mini-play'),
   menuBtn: document.getElementById('mobile-menu-btn'),
