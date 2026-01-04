@@ -723,6 +723,13 @@ export async function renderFavoritesHome() {
 
 // 渲染收藏夹详情页：显示歌曲并提供排序筛选
 function renderPlaylistDetails(playlistId) {
+  // 进入收藏夹详情页时，完全清空批量操作状态
+  batchManager.resetBatchState();
+  batchManager.selectedIds.clear();
+  const stateData = JSON.parse(localStorage.getItem('2fmusic_state') || '{}');
+  stateData.batchSelected = [];
+  localStorage.setItem('2fmusic_state', JSON.stringify(stateData));
+  
   // 1. 优先使用本地缓存数据渲染
   const cachedPlaylist = state.cachedPlaylists.find(p => String(p.id) === String(playlistId));
   const cachedSongs = state.cachedPlaylistSongs[playlistId] || [];
@@ -1015,6 +1022,10 @@ function renderPlaylistSongs(songs) {
 export function switchTab(tab) {
   const previousTab = state.currentTab;
   state.currentTab = tab;
+  
+  // 页面切换时重置右键菜单和清空复选框
+  batchManager.resetBatchState();
+  
   ui.navLocal?.classList.remove('active');
   ui.navFav?.classList.remove('active');
   ui.navMount?.classList.remove('active');

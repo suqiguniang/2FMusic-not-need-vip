@@ -66,9 +66,6 @@ export class BatchManager {
         const item = e.target.closest('.context-menu-item');
         if (!item) return;
         
-        // 在菜单关闭前保存 contextMenuCard
-        const targetCard = this.contextMenuCard;
-        
         if (item.id === 'batch-context-select-one') {
           this.handleContextSelectOne();
         } else if (item.id === 'batch-context-select-all') {
@@ -626,7 +623,7 @@ export class BatchManager {
 
   restoreBatchState() {
     const stateData = JSON.parse(localStorage.getItem('2fmusic_state') || '{}');
-    if (stateData.batchSelected && Array.isArray(stateData.batchSelected)) {
+    if (stateData.batchSelected && Array.isArray(stateData.batchSelected) && stateData.batchSelected.length > 0) {
       this.selectedIds = new Set(stateData.batchSelected);
       
       // 显示复选框
@@ -662,6 +659,18 @@ export class BatchManager {
 
   getSelectedCount() {
     return this.selectedIds.size;
+  }
+
+  // 重置批量管理器状态（在页面切换时调用）
+  resetBatchState() {
+    // 隐藏右键菜单
+    this.hideContextMenu();
+    
+    // 清空所有复选框选择
+    this.clearSelection();
+    
+    // 重置操作标志
+    this.isOperating = false;
   }
 }
 
