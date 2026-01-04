@@ -3,7 +3,7 @@ import { state } from './state.js';
 import { api } from './api.js';
 import { showToast, showConfirmDialog } from './utils.js';
 import { loadPlaylistFilter } from './favorites.js';
-import { loadSongs } from './player.js';
+import { loadSongs, renderPlaylistSongs } from './player.js';
 
 export class BatchManager {
   constructor() {
@@ -533,8 +533,17 @@ export class BatchManager {
         // 刷新收藏夹列表
         await loadPlaylistFilter();
 
-        // 如果在收藏夹页面，刷新当前歌曲列表
-        if (state.currentTab === 'fav') {
+        // 如果在收藏夹详情页，刷新当前收藏夹的歌曲列表
+        if (state.currentTab === 'fav' && state.selectedPlaylistId) {
+          const playlistId = state.selectedPlaylistId;
+          const cachedSongs = state.cachedPlaylistSongs[playlistId] || [];
+          const playlist = JSON.parse(localStorage.getItem('2fmusic_playlist') || '[]');
+          const filteredSongs = cachedSongs.map(songId => {
+            return playlist.find(s => s.id === songId);
+          }).filter(Boolean);
+          renderPlaylistSongs(filteredSongs);
+        } else if (state.currentTab === 'fav') {
+          // 如果在收藏夹列表页，刷新整个列表
           await loadSongs(false, false);
         }
 
@@ -585,8 +594,17 @@ export class BatchManager {
         // 刷新收藏夹列表
         await loadPlaylistFilter();
 
-        // 如果在收藏夹页面，刷新当前歌曲列表
-        if (state.currentTab === 'fav') {
+        // 如果在收藏夹详情页，刷新当前收藏夹的歌曲列表
+        if (state.currentTab === 'fav' && state.selectedPlaylistId) {
+          const playlistId = state.selectedPlaylistId;
+          const cachedSongs = state.cachedPlaylistSongs[playlistId] || [];
+          const playlist = JSON.parse(localStorage.getItem('2fmusic_playlist') || '[]');
+          const filteredSongs = cachedSongs.map(songId => {
+            return playlist.find(s => s.id === songId);
+          }).filter(Boolean);
+          renderPlaylistSongs(filteredSongs);
+        } else if (state.currentTab === 'fav') {
+          // 如果在收藏夹列表页，刷新整个列表
           await loadSongs(false, false);
         }
 

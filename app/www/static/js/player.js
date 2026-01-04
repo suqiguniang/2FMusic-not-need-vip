@@ -974,7 +974,7 @@ function renderPlaylistDetails(playlistId) {
 
 
 // 渲染歌曲列表
-function renderPlaylistSongs(songs) {
+export function renderPlaylistSongs(songs) {
   // 直接使用ui.songContainer，因为它已经有song-list类和网格布局
   const songListContainer = ui.songContainer;
 
