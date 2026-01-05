@@ -24,6 +24,10 @@ export const state = {
   cachedPlaylistsTime: parseInt(localStorage.getItem('2fmusic_cached_playlists_time') || '0'),
   // 收藏夹歌曲缓存，key为playlistId，value为歌曲ID数组
   cachedPlaylistSongs: JSON.parse(localStorage.getItem('2fmusic_cached_playlist_songs') || '{}'),
+  // 缓存设置
+  cacheCovers: JSON.parse(localStorage.getItem('2fmusic_cache_settings') || '{}').cacheCovers === true,
+  cacheLyrics: JSON.parse(localStorage.getItem('2fmusic_cache_settings') || '{}').cacheLyrics === true,
+  offlineSupport: JSON.parse(localStorage.getItem('2fmusic_cache_settings') || '{}').offlineSupport === true,
   neteaseResults: [],
   neteaseRecommendations: [],
   neteaseResultSource: 'recommend',
@@ -56,6 +60,16 @@ export function saveCachedPlaylists(playlists) {
 export function saveCachedPlaylistSongs(playlistId, songs) {
   state.cachedPlaylistSongs[playlistId] = songs;
   localStorage.setItem('2fmusic_cached_playlist_songs', JSON.stringify(state.cachedPlaylistSongs));
+}
+
+// 保存缓存设置
+export function saveCacheSettings() {
+  const cacheSettings = {
+    cacheCovers: state.cacheCovers,
+    cacheLyrics: state.cacheLyrics,
+    offlineSupport: state.offlineSupport
+  };
+  localStorage.setItem('2fmusic_cache_settings', JSON.stringify(cacheSettings));
 }
 
 export function persistState(audio, sortState = {}) {

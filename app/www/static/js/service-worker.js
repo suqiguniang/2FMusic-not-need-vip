@@ -3,9 +3,9 @@ console.log('[SW] Service Worker 已加载');
 
 // 版本号用于控制缓存更新
 const CACHE_VERSION = '2fmusic-v1';
-const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
-const STATIC_CACHE = `${CACHE_VERSION}-static`;
-const IMAGE_CACHE = `${CACHE_VERSION}-images`;
+const STATIC_CACHE = `${CACHE_VERSION}-static`; // 静态资源缓存
+const IMAGE_CACHE = `${CACHE_VERSION}-images`;   // 图片缓存
+// 注：API 响应缓存已迁移到 IndexedDB（2FMusicAPICache），由 api.js 管理
 
 // 缓存不需要缓存的路径
 const EXCLUDE_CACHE_PATHS = [
@@ -99,7 +99,8 @@ self.addEventListener('activate', (event) => {
         cacheNames.map((cacheName) => {
           // 删除不是当前版本的缓存
           if (!cacheName.startsWith('2fmusic-')) return Promise.resolve();
-          if (cacheName === STATIC_CACHE || cacheName === RUNTIME_CACHE || cacheName === IMAGE_CACHE) {
+          // 保留静态资源和图片缓存（API 响应缓存已由 IndexedDB 接管）
+          if (cacheName === STATIC_CACHE || cacheName === IMAGE_CACHE) {
             return Promise.resolve();
           }
           
@@ -130,9 +131,24 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // API 请求：网络优先，联网时获取最新数据，离线时使用缓存
+  // API 请求：交由应用层处理（IndexedDB 缓存由 api.js 管理）
+  // Service Worker 仅提供网络失败时的降级（返回缓存或离线页面）
   if (url.pathname.startsWith('/api/')) {
-    event.respondWith(networkFirst(request));
+    event.respondWith(
+      fetch(request)
+        .then(response => response) // 网络成功，直接返回
+        .catch(() => {
+          // 网络失败，返回离线提示
+          return new Response(JSON.stringify({
+            success: false,
+            message: '离线状态，请检查网络连接',
+            offline: true
+          }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        })
+    );
     return;
   }
 
@@ -148,13 +164,32 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 图片：缓存优先，联网时检查更新
+  // 音乐封面图片（covers路径）：缓存优先，一次缓存永久使用
+  if (url.pathname.includes('/api/music/covers/')) {
+    event.respondWith(
+      cacheFirst(request, IMAGE_CACHE)
+        .then((response) => {
+          if (response) {
+            console.log(`[SW] 封面缓存命中: ${request.url}`);
+            return response;
+          }
+          console.log(`[SW] 封面无缓存且离线: ${request.url}`);
+          throw new Error('No cache and offline');
+        })
+    );
+    return;
+  }
+
+  // 其他图片：缓存优先，联网时检查更新
   if (request.destination === 'image') {
     event.respondWith(
       cacheFirst(request, IMAGE_CACHE)
         .then((response) => {
           if (response) {
-            console.log(`[SW] 图片缓存命中: ${request.url}`);
+            // 跳过默认图片的日志，减少噪音
+            if (!request.url.includes('ICON_256.PNG')) {
+              console.log(`[SW] 图片缓存命中: ${request.url}`);
+            }
             return response;
           }
           console.log(`[SW] 图片无缓存且离线: ${request.url}`);
@@ -168,7 +203,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(networkFirst(request));
 });
 
-// 网络优先策略
+// 网络优先策略（仅用于静态资源）
 function networkFirst(request) {
   return fetch(request)
     .then((response) => {
@@ -177,9 +212,9 @@ function networkFirst(request) {
         throw new Error(`HTTP ${response?.status}`);
       }
 
-      // 成功响应时，也保存到运行时缓存
+      // 成功响应时，保存到静态缓存
       const responseToCache = response.clone();
-      caches.open(RUNTIME_CACHE).then((cache) => {
+      caches.open(STATIC_CACHE).then((cache) => {
         cache.put(request, responseToCache);
       });
 
@@ -246,11 +281,55 @@ self.addEventListener('sync', (event) => {
   }
 });
 
-// 同步离线数据
+// 同步离线数据 - 包括IndexedDB和localStorage的数据
 async function syncOfflineData() {
   try {
-    // 待实现：同步离线时进行的操作（如收藏等）
-    console.log('[SW] 执行离线数据同步...');
+    console.log('[SW] 开始离线数据同步...');
+    
+    // 打开IndexedDB连接
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('2FMusicDB', 2);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    
+    // 同步播放历史
+    const playHistory = await new Promise((resolve, reject) => {
+      const tx = db.transaction(['playHistory'], 'readonly');
+      const store = tx.objectStore('playHistory');
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    
+    if (playHistory.length > 0) {
+      console.log(`[SW] 同步 ${playHistory.length} 条播放历史`);
+      // 可在此添加上传到服务器的逻辑
+    }
+    
+    // 同步收藏数据（从localStorage）
+    const favorites = localStorage.getItem('2fmusic_favorites');
+    if (favorites) {
+      console.log('[SW] 同步收藏数据');
+      // 可在此添加上传到服务器的逻辑
+    }
+    
+    // 同步歌单缓存
+    const playlistCache = await new Promise((resolve, reject) => {
+      const tx = db.transaction(['playlistCache'], 'readonly');
+      const store = tx.objectStore('playlistCache');
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    
+    if (playlistCache.length > 0) {
+      console.log(`[SW] 同步 ${playlistCache.length} 个歌单缓存`);
+      // 可在此添加上传到服务器的逻辑
+    }
+    
+    db.close();
+    console.log('[SW] 离线数据同步完成');
     return Promise.resolve();
   } catch (e) {
     console.error('[SW] 同步失败:', e);
@@ -291,6 +370,22 @@ self.addEventListener('notificationclick', (event) => {
       }
     })
   );
+});
+
+// 消息处理：来自客户端的请求
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+  
+  // 处理手动同步请求
+  if (event.data && event.data.type === 'SYNC_NOW') {
+    syncOfflineData().then(() => {
+      event.ports[0].postMessage({ success: true, message: '同步完成' });
+    }).catch((err) => {
+      event.ports[0].postMessage({ success: false, message: err.message });
+    });
+  }
 });
 
 console.log('[SW] Service Worker 已加载');

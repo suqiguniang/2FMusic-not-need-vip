@@ -331,7 +331,15 @@ def calculate_global_version(force_refresh=False):
 
 @app.template_filter('static_url')
 def static_url(filename):
-    """生成带有MD5版本号的静态文件URL，用于强制浏览器刷新缓存"""
+    """生成带有MD5版本号的静态文件URL（图片除外）
+    
+    图片资源由 Service Worker 的缓存策略管理，不需要版本参数。
+    只有 CSS 和 JS 文件需要版本号以便在更新时强制刷新。
+    """
+    # 图片资源不添加版本号，由 Service Worker 缓存管理
+    if filename.startswith('images/'):
+        return url_for('static', filename=filename)
+    
     # 获取静态文件的绝对路径
     file_path = os.path.join(STATIC_DIR, filename)
     # 计算文件的MD5值作为版本参数
@@ -345,16 +353,20 @@ def ensure_static_version():
     """确保所有静态资源请求都带有版本参数（某些文件除外）"""
     if request.path.startswith('/static/'):
         # 不能通过重定向加载的资源和Service Worker不应该缓存的资源
-        # 这些文件应该直接返回或由应用直接请求带版本号的URL
+        # 以下文件不需要版本参数，由缓存策略管理：
+        # - service-worker.js: Service Worker 自己管理版本
+        # - manifest.json: PWA 清单文件
+        # - 图片资源: 静态图片由 Service Worker 永久缓存
         excluded_patterns = [
             'service-worker.js',
             'manifest.json',
+            'images/',  # 所有图片资源由 Service Worker 缓存管理
         ]
         
         filename = request.path.replace('/static/', '', 1).split('?')[0]
         
         # 如果是排除的文件，不做重定向
-        if any(filename.endswith(f) for f in excluded_patterns):
+        if any(filename.endswith(f) or f in filename for f in excluded_patterns):
             return None
         
         # 如果请求没有版本参数，重定向到带有版本参数的URL

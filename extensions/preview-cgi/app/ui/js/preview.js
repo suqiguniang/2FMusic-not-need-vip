@@ -112,6 +112,15 @@ function bindEvents() {
             state.track.lyrics = null;
             updateTrackUi();
             renderNoLyrics('正在搜索歌词...');
+            
+            // 清除 localStorage 中的缓存
+            const cacheKeyBase = `${state.track.title}_${state.track.artist}`;
+            try {
+              localStorage.removeItem(`2f_cache_cover_${cacheKeyBase}`);
+              localStorage.removeItem(`2f_lyrics_${cacheKeyBase}`);
+            } catch (e) {
+              console.warn('清除缓存失败:', e);
+            }
 
             // 重新获取 (延迟以待后台清理)
             setTimeout(() => fetchMetadata(state.track), 500);
@@ -392,13 +401,22 @@ async function fetchMetadata(track) {
             track.cover = cachedCover;
             applyCover(track.cover);
         } else {
-            api.library.albumArt(query).then(d => {
-                if (d.success && d.album_art) {
-                    track.cover = toProxyUrl(d.album_art);
-                    localStorage.setItem(coverKey, track.cover);
-                    applyCover(track.cover);
-                }
-            });
+            api.library.albumArt(query)
+                .then(d => {
+                    if (d.success && d.album_art) {
+                        track.cover = toProxyUrl(d.album_art);
+                        try {
+                            localStorage.setItem(coverKey, track.cover);
+                        } catch (e) {
+                            console.warn('存储封面URL失败:', e);
+                        }
+                        applyCover(track.cover);
+                    }
+                })
+                .catch(err => {
+                    console.warn('[Offline] 封面获取失败，将使用默认图标:', err);
+                    // 离线或网络错误时保留默认图标
+                });
         }
     } else {
         // 已有封面，直接提取颜色
@@ -412,7 +430,7 @@ async function fetchMetadata(track) {
 
 function applyCover(url) {
     if (ui.cover) {
-        ui.cover.src = url.includes('?') ? (url + '&t=' + Date.now()) : url;
+        ui.cover.src = url;
         // 提取颜色
         if (window.ColorThief) {
             ui.cover.onload = () => updateBgColor(ui.cover);

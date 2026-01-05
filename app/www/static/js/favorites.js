@@ -3,6 +3,7 @@ import { ui } from './ui.js';
 import { api } from './api.js';
 import { showToast, updateDetailFavButton } from './utils.js';
 import { renderPlaylist } from './player.js';
+import { getPlaylistSongsCache, savePlaylistCache } from './db.js';
 
 // 旧的缓存机制已替换为state.js中的持久化缓存
 
@@ -15,21 +16,22 @@ export function clearPlaylistCache() {
   localStorage.setItem('2fmusic_cached_playlist_songs', JSON.stringify({}));
 }
 
-// 加载收藏夹筛选列表 (带缓存优化)
+// 加载收藏夹筛选列表 (带双层缓存优化)
 export async function loadPlaylistFilter() {
   if (!ui.playlistFilter) return;
   
   try {
-    // 优先使用本地缓存数据 - 立即显示
+    // 第一步：优先使用本地缓存数据 - 立即显示
     let playlists = state.cachedPlaylists;
     let isUsingCache = playlists.length > 0;
     
     // 渲染缓存数据（如果有）
     if (isUsingCache) {
       renderPlaylistFilterOptions(playlists);
+      console.log('[Cache] 使用本地缓存的收藏夹列表');
     }
     
-    // 后台获取最新数据（即使有缓存也要更新）
+    // 第二步：后台获取最新数据（即使有缓存也要更新）
     try {
       const res = await api.favoritePlaylists.list();
       if (res && res.data) {
@@ -40,11 +42,18 @@ export async function loadPlaylistFilter() {
         if (hasChanged) {
           renderPlaylistFilterOptions(newPlaylists);
           saveCachedPlaylists(newPlaylists);
+          console.log('[API] 收藏夹列表已更新');
         }
       }
     } catch (e) {
       // 后台更新失败，继续使用缓存
-      console.warn('Failed to fetch latest playlists:', e);
+      console.warn('[Offline] 获取最新收藏夹列表失败，使用缓存:', e.message);
+      if (!isUsingCache) {
+        // 缓存为空且网络失败，显示提示
+        if (ui.playlistFilter) {
+          ui.playlistFilter.innerHTML = '<option value="">暂无收藏夹（离线）</option>';
+        }
+      }
     }
   } catch (e) {
     console.error('加载收藏夹列表失败:', e);
@@ -100,12 +109,41 @@ export async function loadPlaylistSongs(playlistId) {
   if (!ui.songContainer) return;
   
   try {
+    // 第一层：检查 IndexedDB 缓存
+    let cachedSongs = await getPlaylistSongsCache(playlistId);
+    if (cachedSongs) {
+      console.log(`[Cache] 歌单 ${playlistId} 从 IndexedDB 读取 (${cachedSongs.length} 首)`);
+      // 立即显示缓存数据
+      return cachedSongs;
+    }
+    
+    // 第二层：从 API 获取
     const res = await api.favoritePlaylists.getSongs(playlistId);
     if (res.success && res.data) {
       const playlistSongIds = new Set(res.data);
+      
+      // 保存到 IndexedDB 缓存
+      try {
+        await savePlaylistCache(`playlistSongs_${playlistId}`, res.data);
+      } catch (e) {
+        console.warn('保存歌单缓存失败:', e);
+      }
+      
+      return res.data;
     }
   } catch (e) {
     console.error('加载收藏夹歌曲失败:', e);
+    
+    // 第三层：降级方案 - 尝试从 IndexedDB 获取过期缓存
+    try {
+      const fallbackSongs = await getPlaylistSongsCache(playlistId);
+      if (fallbackSongs) {
+        console.warn(`[Fallback] 使用过期的 IndexedDB 缓存: ${playlistId}`);
+        return fallbackSongs;
+      }
+    } catch (err) {
+      console.error('Fallback 缓存获取失败:', err);
+    }
   }
 }
 
@@ -121,7 +159,9 @@ export function showPlaylistSelectDialog(song, btnEl) {
         <h3>选择收藏夹</h3>
         <button id="close-btn" class="close-btn">&times;</button>
       </div>
-      <div class="playlists-container"></div>
+      <div class="playlists-container" style="min-height: 100px; display: flex; align-items: center; justify-content: center;">
+        <span style="color: #999;">加载中...</span>
+      </div>
       <div class="dialog-actions">
         <button id="confirm-btn" class="btn-primary">确定</button>
       </div>
@@ -131,22 +171,54 @@ export function showPlaylistSelectDialog(song, btnEl) {
   // 使用CSS定义的样式，不再设置内联样式
   const dialogContent = dialog.querySelector('.dialog-content');
   const confirmBtn = dialog.querySelector('#confirm-btn');
+  const container = dialog.querySelector('.playlists-container');
   
-  // 获取收藏夹列表
+  // 直接显示对话框（立即显示，不等数据加载）
+  document.body.appendChild(dialog);
+  
+  // 加载关闭按钮事件（在对话框显示后再绑定）
+  const closeBtn = dialog.querySelector('#close-btn');
+  
+  // 获取收藏夹列表（并行处理：立即使用缓存，同时后台更新）
   (async () => {
     try {
       let playlists = [];
-      // 优先使用本地缓存数据
-      if (state && state.cachedPlaylists) {
+      
+      // 第一步：立即使用本地缓存数据渲染（如果存在）
+      if (state && state.cachedPlaylists && state.cachedPlaylists.length > 0) {
         playlists = state.cachedPlaylists;
+        renderPlaylistsInDialog(playlists);
       } else {
-        // 如果缓存中没有数据或数据为空，从API获取
-        const res = await api.favoritePlaylists.list();
-        if (res && res.data) {
-          playlists = res.data;
-        }
+        // 缓存为空，显示加载提示
+        container.innerHTML = '<span style="color: #999;">加载中...</span>';
       }
       
+      // 第二步：后台获取最新数据（即使有缓存也要更新）
+      try {
+        const res = await api.favoritePlaylists.list();
+        if (res && res.data && res.data.length > 0) {
+          playlists = res.data;
+          // 更新缓存
+          if (!res.offline) {
+            saveCachedPlaylists(playlists);
+          }
+          // 重新渲染（数据有变化）
+          renderPlaylistsInDialog(playlists);
+        }
+      } catch (e) {
+        // 后台更新失败，如果缓存为空则显示错误
+        if (playlists.length === 0) {
+          container.innerHTML = '<span style="color: #999;">无法加载收藏夹，请检查网络</span>';
+        }
+        console.warn('后台更新收藏夹失败:', e);
+      }
+    } catch (e) {
+      container.innerHTML = '<span style="color: red;">加载收藏夹失败</span>';
+      console.error('加载收藏夹列表失败:', e);
+    }
+    
+    // 渲染收藏夹列表到对话框
+    function renderPlaylistsInDialog(playlists) {
       // 去重处理
       const uniquePlaylists = [];
       const seenIds = new Set();
@@ -158,8 +230,12 @@ export function showPlaylistSelectDialog(song, btnEl) {
         }
       });
       
-      const container = dialog.querySelector('.playlists-container');
       container.innerHTML = '';
+      
+      if (uniquePlaylists.length === 0) {
+        container.innerHTML = '<span style="color: #999;">暂无收藏夹</span>';
+        return;
+      }
       
       uniquePlaylists.forEach(playlist => {
         const item = document.createElement('div');
@@ -172,20 +248,10 @@ export function showPlaylistSelectDialog(song, btnEl) {
         `;
         container.appendChild(item);
       });
-    } catch (e) {
-      console.error('加载收藏夹列表失败:', e);
     }
   })();
   
-  // 直接显示对话框
-  document.body.appendChild(dialog);
-  
-  // 即使获取收藏夹列表失败，也要显示对话框（使用默认样式）
-  // 对话框显示逻辑已经在上面的async函数和图片加载事件中处理
-  
   // 确认按钮事件
-  const closeBtn = dialog.querySelector('#close-btn');
-  
   const confirmHandler = () => {
     const playlistId = dialog.querySelector('input[name="playlist"]:checked');
     if (playlistId) {

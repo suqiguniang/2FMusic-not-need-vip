@@ -7,6 +7,7 @@ import { showPlaylistSelectDialog, loadPlaylistFilter, handlePlaylistFilterChang
 import { batchManager } from './batch-manager.js';
 import { renderArtistAggregateView } from './artist-aggregate.js';
 import { openQueueModal } from './queue-manager.js';
+import { getCoverFromCache, saveCoverToCache, deleteCoverFromCache, getLyricsFromCache, saveLyricsToCache, deleteLyricsFromCache } from './db.js';
 
 // 收藏功能相关函数已部分移至 favorites.js
 
@@ -136,6 +137,7 @@ function releaseWakeLock() {
 }
 
 export async function loadSongs(retry = true, initPlayer = true) {
+  console.log('[Player] loadSongs 开始执行 (retry=' + retry + ', initPlayer=' + initPlayer + ')');
   // 初始化排序顺序：如果未设置过或排序顺序与该排序方式的默认值不符，则使用默认值
   if (!state.savedState.sortOrder || state.savedState.sortOrder !== getDefaultSortOrder(state.currentSort)) {
     state.sortOrder = getDefaultSortOrder(state.currentSort);
@@ -152,18 +154,61 @@ export async function loadSongs(retry = true, initPlayer = true) {
   }
 
   try {
-    // 并行获取歌曲库和收藏列表
-    const [libJson, favJson] = await Promise.all([
+    // 并行获取歌曲库、收藏列表和收藏夹列表，允许单个失败
+    const results = await Promise.allSettled([
       api.library.list(),
-      api.favorites.list()
+      api.favorites.list(),
+      api.favoritePlaylists.list()
     ]);
+    
+    const libJson = results[0].status === 'fulfilled' ? results[0].value : { success: false, data: [], offline: true };
+    const favJson = results[1].status === 'fulfilled' ? results[1].value : { success: false, data: [], offline: true };
+    const playlistJson = results[2].status === 'fulfilled' ? results[2].value : { success: false, data: [], offline: true };
+    
+    if (results[0].status === 'rejected') {
+      console.error('[Player] 音乐列表获取异常:', results[0].reason);
+    }
+    if (results[1].status === 'rejected') {
+      console.error('[Player] 收藏列表获取异常:', results[1].reason);
+    }
+    if (results[2].status === 'rejected') {
+      console.error('[Player] 收藏夹列表获取异常:', results[2].reason);
+    }
+
+    // 检查是否从离线缓存获取
+    const isOffline = libJson.offline || favJson.offline || playlistJson.offline;
+    if (isOffline) {
+      console.log('[离线] 使用缓存数据:');
+      if (libJson.offline) console.log(`  - 音乐列表: ${libJson.data?.length || 0} 首歌曲`);
+      if (favJson.offline) console.log(`  - 收藏列表: ${favJson.data?.length || 0} 首歌曲`);
+      if (playlistJson.offline) console.log(`  - 收藏夹列表: ${playlistJson.data?.length || 0} 个收藏夹`);
+    }
 
     if (favJson.success && favJson.data) {
       state.favorites = new Set(favJson.data);
       saveFavorites();
     }
 
+    // 加载并缓存收藏夹列表
+    if (playlistJson.success && playlistJson.data) {
+      saveCachedPlaylists(playlistJson.data);
+      
+      // 预加载所有收藏夹内的歌曲列表（离线缓存用）
+      console.log('[Player] 预加载所有收藏夹歌曲列表...');
+      for (const playlist of playlistJson.data) {
+        try {
+          const songs = await api.favoritePlaylists.getSongs(playlist.id);
+          if (songs.success) {
+            console.log(`[Player] 已预加载收藏夹歌曲: ${playlist.name} (${songs.data?.length || 0} 首)`);
+          }
+        } catch (e) {
+          console.warn(`[Player] 预加载收藏夹歌曲失败: ${playlist.name}`, e.message);
+        }
+      }
+    }
+
     if (libJson.success && libJson.data) {
+      console.log('[Player] 处理音乐列表数据，共 ' + libJson.data.length + ' 首歌曲');
       // 2. 合并数据：保留本地缓存的封面和歌词
       const oldMap = new Map(state.fullPlaylist.map(s => [s.filename, s]));
       const newList = libJson.data.map(item => {
@@ -210,12 +255,40 @@ export async function loadSongs(retry = true, initPlayer = true) {
       if (state.playQueue.length === 0) state.playQueue = [...state.fullPlaylist];
       if (!ui.audio.src && initPlayer) { await initPlayerState(); }
     } else {
-      if (ui.songContainer.children.length === 0)
-        ui.songContainer.innerHTML = '<div class="loading">加载失败</div>';
+      console.error('[Player] 无法获取音乐列表数据:', libJson.message);
+      if (ui.songContainer.children.length === 0) {
+        // 检查是否有本地缓存的数据
+        if (state.fullPlaylist.length > 0) {
+          console.log('[Player] 使用本地缓存的音乐列表，共 ' + state.fullPlaylist.length + ' 首歌曲');
+          state.playQueue = [...state.fullPlaylist];
+          renderPlaylist();
+        } else {
+          ui.songContainer.innerHTML = '<div class="loading">加载失败</div>';
+        }
+      }
     }
   } catch (e) {
-    console.error(e);
-    if (retry) setTimeout(() => loadSongs(false), 2000);
+    console.error('[Player] loadSongs 异常:', e);
+    // 异常情况下，使用本地缓存数据继续显示
+    if (state.fullPlaylist.length > 0) {
+      console.log('[Player] [异常恢复] 使用本地缓存的音乐列表，共 ' + state.fullPlaylist.length + ' 首歌曲');
+      state.playQueue = [...state.fullPlaylist];
+      updateSortButton();
+      if (state.currentTab === 'local' || state.currentTab === 'fav') {
+        renderPlaylist();
+      }
+      if (!ui.audio.src && initPlayer) { await initPlayerState(); }
+    } else {
+      // 没有任何缓存，显示加载失败
+      if (ui.songContainer.children.length === 0)
+        ui.songContainer.innerHTML = '<div class="loading">离线且无缓存数据</div>';
+    }
+    
+    // 重试一次（2秒后）
+    if (retry) {
+      console.log('[Player] 2秒后重试...');
+      setTimeout(() => loadSongs(false), 2000);
+    }
   }
 }
 
@@ -539,6 +612,61 @@ export function renderPlaylist() {
       frag.appendChild(card);
     });
     ui.songContainer.appendChild(frag);
+
+    // 离线缓存或网络改进：预加载所有列表项的封面（异步并发，不阻塞 UI）
+    if (state.displayPlaylist.length > 0) {
+      console.log('[Player] 开始后台加载 ' + state.displayPlaylist.length + ' 首歌曲的封面');
+      // 使用异步生成器实现并发控制
+      const loadCoversWithConcurrency = async (songs, maxConcurrent = 3) => {
+        let inProgress = 0;
+        let songIndex = 0;
+        
+        while (songIndex < songs.length) {
+          // 并发加载最多 maxConcurrent 个
+          while (inProgress < maxConcurrent && songIndex < songs.length) {
+            const song = songs[songIndex];
+            const index = songIndex;
+            inProgress++;
+            
+            (async () => {
+              try {
+                // 获取缓存的封面
+                if (song.cover?.includes('ICON_256')) {
+                  const cacheKey = song.id || song.filename;
+                  try {
+                    const cachedCover = await Promise.race([
+                      getCoverFromCache(cacheKey),
+                      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
+                    ]);
+                    if (cachedCover) {
+                      song.cover = cachedCover;
+                      // 更新 DOM 中对应的图片
+                      const cards = ui.songContainer.querySelectorAll('.song-card');
+                      if (cards[index]) {
+                        const img = cards[index].querySelector('img');
+                        if (img) img.src = cachedCover;
+                      }
+                    }
+                  } catch (e) {
+                    // 缓存加载失败或超时，保持默认封面
+                  }
+                }
+              } finally {
+                inProgress--;
+              }
+            })();
+            
+            songIndex++;
+          }
+          
+          // 等待至少一个完成
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+      };
+      
+      // 异步加载，不阻塞主线程
+      loadCoversWithConcurrency(state.displayPlaylist, 3).catch(e => console.warn('[Player] 后台加载封面出错:', e.message));
+    }
 
     // 恢复批量选择状态
     if (batchManager && batchManager.restoreBatchState) {
@@ -1094,6 +1222,56 @@ export function renderPlaylistSongs(songs, skipSort = false) {
   songListContainer.appendChild(frag);
   highlightCurrentTrack();
 
+  // 后台异步并发加载封面（不阻塞 UI）
+  if (sortedSongs.length > 0) {
+    console.log('[Player] 开始后台加载 ' + sortedSongs.length + ' 首歌曲的封面');
+    const loadCoversWithConcurrency = async (songs, maxConcurrent = 3) => {
+      let inProgress = 0;
+      let songIndex = 0;
+      
+      while (songIndex < songs.length) {
+        while (inProgress < maxConcurrent && songIndex < songs.length) {
+          const song = songs[songIndex];
+          const index = songIndex;
+          inProgress++;
+          
+          (async () => {
+            try {
+              if (song.cover?.includes('ICON_256')) {
+                const cacheKey = song.id || song.filename;
+                try {
+                  const cachedCover = await Promise.race([
+                    getCoverFromCache(cacheKey),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
+                  ]);
+                  if (cachedCover) {
+                    song.cover = cachedCover;
+                    // 更新 DOM 中对应的图片
+                    const cards = songListContainer.querySelectorAll('.song-card');
+                    if (cards[index]) {
+                      const img = cards[index].querySelector('img');
+                      if (img) img.src = cachedCover;
+                    }
+                  }
+                } catch (e) {
+                  // 缓存加载失败或超时，保持默认封面
+                }
+              }
+            } finally {
+              inProgress--;
+            }
+          })();
+          
+          songIndex++;
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+    };
+    
+    loadCoversWithConcurrency(sortedSongs, 3).catch(e => console.warn('[Player] 后台加载封面出错:', e.message));
+  }
+
   // 恢复批量选择状态
   if (batchManager && batchManager.restoreBatchState) {
     batchManager.restoreBatchState();
@@ -1530,40 +1708,232 @@ async function checkAndFetchMetadata(track, fetchId) {
       parseAndRenderLyrics(track.lyrics);
       return;
     }
+    
+    const cacheKey = track.id || track.filename;
+    const startTime = performance.now();
+    
     try {
-      const d = await api.library.lyrics(query);
-      if (fetchId !== state.currentFetchId) return;
-      if (d.success && d.lyrics && d.lyrics.trim() !== '') {
-        track.lyrics = d.lyrics;
+      // 第一层：检查 IndexedDB 缓存
+      const cachedLyrics = await getLyricsFromCache(cacheKey);
+      if (cachedLyrics) {
+        console.log('[Cache] 歌词命中 IndexedDB (', Math.round(performance.now() - startTime), 'ms )');
+        track.lyrics = cachedLyrics;
         savePlaylist();
-        parseAndRenderLyrics(d.lyrics);
-      } else {
-        renderNoLyrics('暂无歌词');
+        parseAndRenderLyrics(cachedLyrics);
+        return;
+      }
+      
+      // 第二层：从 API 获取（带超时控制）
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时
+      
+      try {
+        const d = await api.library.lyrics(query);
+        clearTimeout(timeoutId);
+        
+        if (fetchId !== state.currentFetchId) return;
+        if (d.success && d.lyrics && d.lyrics.trim() !== '') {
+          console.log('[API] 歌词加载成功 (', Math.round(performance.now() - startTime), 'ms )');
+          track.lyrics = d.lyrics;
+          savePlaylist();
+          
+          // 根据用户设置决定是否保存到 IndexedDB
+          if (state.cacheLyrics !== false) {
+            try {
+              await saveLyricsToCache(cacheKey, d.lyrics);
+            } catch (err) {
+              console.warn('保存歌词到 IndexedDB 失败:', err);
+            }
+          } else {
+            console.log('[Cache] 歌词缓存已禁用，跳过保存');
+          }
+          
+          parseAndRenderLyrics(d.lyrics);
+        } else {
+          renderNoLyrics('暂无歌词');
+        }
+      } catch (err) {
+        clearTimeout(timeoutId);
+        
+        if (err.name === 'AbortError') {
+          console.warn('歌词加载超时 (5s)，尝试使用缓存');
+          // 超时时尝试使用过期缓存
+          const fallbackLyrics = await getLyricsFromCache(cacheKey);
+          if (fallbackLyrics) {
+            console.log('[Fallback] 使用过期的歌词缓存');
+            track.lyrics = fallbackLyrics;
+            parseAndRenderLyrics(fallbackLyrics);
+            return;
+          }
+        }
+        
+        throw err; // 重新抛出异常，交给外层处理
       }
     } catch (e) {
-      if (fetchId === state.currentFetchId) {
-        // 如果API请求失败，但本地可能有缓存的无效歌词，尝试重新解析
-        if (track.lyrics && track.lyrics.trim() !== '') {
-          parseAndRenderLyrics(track.lyrics);
-        } else {
-          renderNoLyrics('歌词加载失败');
-        }
+      console.error('歌词加载失败:', e.message);
+      
+      // 降级方案：使用本地歌词或缓存
+      if (track.lyrics && track.lyrics.trim() !== '') {
+        parseAndRenderLyrics(track.lyrics);
+      } else {
+        renderNoLyrics('歌词加载失败，请检查网络');
       }
     }
   };
 
   const fetchCover = async () => {
-    if (!track.cover.includes('ICON_256.PNG')) return;
+    const cacheKey = track.id || track.filename;
+    const startTime = performance.now();
+    
+    console.log('[Fetch] 检查封面 - track.cover:', track.cover?.substring(0, 50));
+    
     try {
-      const d = await api.library.albumArt(query);
-      if (fetchId !== state.currentFetchId) return;
-      if (d.success && d.album_art) {
-        track.cover = d.album_art;
-        savePlaylist(); // 保存封面更新
-        if (ui.audio.src.includes(encodeURIComponent(track.id))) { ['current-cover', 'fp-cover'].forEach(id => { const el = document.getElementById(id); if (el) el.src = track.cover; }); }
-        renderPlaylist();
+      // 第一层：如果是默认封面，先检查 IndexedDB 缓存（带超时）
+      if (track.cover.includes('ICON_256.PNG')) {
+        console.log('[Fetch] 封面未获取，尝试从缓存加载');
+        
+        // 使用 Promise.race 实现缓存读取超时（2秒）
+        let cachedCover = null;
+        try {
+          cachedCover = await Promise.race([
+            getCoverFromCache(cacheKey),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Cache read timeout')), 2000))
+          ]);
+        } catch (err) {
+          if (err.message === 'Cache read timeout') {
+            console.warn('[Cache] 缓存读取超时，跳过本地缓存');
+          } else {
+            console.warn('[Cache] 缓存读取失败:', err.message);
+          }
+        }
+        
+        if (cachedCover) {
+          console.log('[Cache] 封面命中 IndexedDB (', Math.round(performance.now() - startTime), 'ms )');
+          track.cover = cachedCover;
+          savePlaylist();
+          if (ui.audio.src.includes(encodeURIComponent(track.id))) { ['current-cover', 'fp-cover'].forEach(id => { const el = document.getElementById(id); if (el) el.src = track.cover; }); }
+          renderPlaylist();
+          return;
+        }
+        
+        // 第二层：离线状态下立即使用默认封面（不等网络）
+        if (!navigator.onLine) {
+          console.log('[Offline] 离线状态，跳过 API 请求，使用默认封面');
+          return;  // 保持默认封面，不再等待网络
+        }
+        
+        // 第三层：在线时才尝试 API 获取（短超时）
+        console.log('[Fetch] 开始从 API 获取封面...');
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000); // 3秒超时（比之前更短）
+        
+        try {
+          const d = await api.library.albumArt(query);
+          clearTimeout(timeoutId);
+          
+          if (fetchId !== state.currentFetchId) return;
+          if (d.success && d.album_art) {
+            console.log('[API] 封面加载成功 (', Math.round(performance.now() - startTime), 'ms )');
+            track.cover = d.album_art;
+            savePlaylist(); // 保存封面更新
+            
+            // 根据用户设置决定是否保存到缓存
+            if (state.cacheCovers !== false) {
+              try {
+                await saveCoverToCache(cacheKey, d.album_art);
+                // localStorage 作为备用：只保存 URL，不保存文件
+                localStorage.setItem(`2f_cover_url_${cacheKey}`, d.album_art);
+                console.log('[Cache] API 获取的封面已缓存到 IndexedDB (文件)，URL 备份到 localStorage');
+              } catch (err) {
+                console.warn('保存封面到缓存失败:', err);
+              }
+            } else {
+              console.log('[Cache] 封面缓存已禁用，跳过保存');
+            }
+            
+            if (ui.audio.src.includes(encodeURIComponent(track.id))) { ['current-cover', 'fp-cover'].forEach(id => { const el = document.getElementById(id); if (el) el.src = track.cover; }); }
+            renderPlaylist();
+          }
+        } catch (err) {
+          clearTimeout(timeoutId);
+          
+          console.warn('封面 API 请求失败:', err.message);
+          
+          // 网络错误时自动尝试使用缓存（无论是超时还是连接失败）
+          try {
+            const fallbackCover = await Promise.race([
+              getCoverFromCache(cacheKey),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Cache fallback timeout')), 1000))
+            ]);
+            if (fallbackCover && track.cover.includes('ICON_256.PNG')) {
+              console.log('[Fallback] 自动使用缓存的封面（网络请求失败）');
+              track.cover = fallbackCover;
+              savePlaylist();
+              if (ui.audio.src.includes(encodeURIComponent(track.id))) { ['current-cover', 'fp-cover'].forEach(id => { const el = document.getElementById(id); if (el) el.src = track.cover; }); }
+              renderPlaylist();
+              return;
+            }
+          } catch (fallbackErr) {
+            console.warn('[Fallback] 缓存降级也失败或超时:', fallbackErr.message);
+          }
+          
+          // 缓存也不存在，继续处理
+          throw err;
+        }
+      } else {
+        // 封面 URL 已可用（已从服务器获取或已缓存），检查是否需要使用缓存的文件
+        console.log('[Fetch] 封面 URL 已可用，检查是否使用缓存的文件');
+        
+        try {
+          const cachedCover = await getCoverFromCache(cacheKey);
+          if (cachedCover) {
+            // 找到了缓存的文件，使用 Blob URL 替换原始 URL
+            console.log('[Cache] 找到缓存的封面文件，使用本地 Blob URL');
+            track.cover = cachedCover;  // 使用 Blob URL
+            savePlaylist();
+            if (ui.audio.src.includes(encodeURIComponent(track.id))) { 
+              ['current-cover', 'fp-cover'].forEach(id => { 
+                const el = document.getElementById(id); 
+                if (el) el.src = track.cover; 
+              }); 
+            }
+            renderPlaylist();
+            return;
+          }
+          
+          // 没有缓存的文件，但如果启用了缓存，则后台保存
+          if (state.cacheCovers !== false) {
+            try {
+              await saveCoverToCache(cacheKey, track.cover);
+              localStorage.setItem(`2f_cover_url_${cacheKey}`, track.cover);
+              console.log('[Cache] 封面已缓存到 IndexedDB (文件)');
+            } catch (err) {
+              console.warn('保存封面到缓存失败:', err);
+            }
+          } else {
+            console.log('[Cache] 封面缓存已禁用，不保存');
+          }
+        } catch (err) {
+          console.warn('检查封面缓存失败:', err);
+        }
       }
-    } catch (e) { }
+    } catch (e) {
+      console.error('封面加载失败:', e.message);
+      
+      // 降级方案 - 尝试使用 localStorage 中的 URL 备份
+      try {
+        const lsUrlCache = localStorage.getItem(`2f_cover_url_${cacheKey}`);
+        if (lsUrlCache && track.cover.includes('ICON_256.PNG')) {
+          console.log('[Fallback] 使用 localStorage 中的封面 URL 备份');
+          track.cover = lsUrlCache;
+          savePlaylist();
+          if (ui.audio.src.includes(encodeURIComponent(track.id))) { ['current-cover', 'fp-cover'].forEach(id => { const el = document.getElementById(id); if (el) el.src = track.cover; }); }
+          renderPlaylist();
+        }
+      } catch (e2) {
+        console.warn('读取缓存封面失败:', e2.message);
+      }
+    }
   };
 
   await Promise.all([fetchLyrics(), fetchCover()]);
@@ -1940,9 +2310,25 @@ export function bindUiControls() {
         hideProgressToast(); // clear loading toast
         if (res.success) {
           showToast('已重置，正在重新搜索...');
-          // 1. Reset Local Cache
+          
+          // 1. Reset Local Cache (in-memory and storage)
           currentSong.cover = "/static/images/ICON_256.PNG";
           delete currentSong.lyrics;
+          
+          const cacheKey = currentSong.id || currentSong.filename;
+          
+          // 清除所有缓存层的数据
+          try {
+            // 清除 localStorage 中的缓存
+            localStorage.removeItem(`2f_cover_${cacheKey}`);
+            localStorage.removeItem(`2f_lyrics_${cacheKey}`);
+            
+            // 清除 IndexedDB 中的缓存
+            await deleteCoverFromCache(cacheKey);
+            await deleteLyricsFromCache(cacheKey);
+          } catch (e) {
+            console.warn('清除缓存失败:', e);
+          }
 
           // 2. Reset UI
           ['current-cover', 'fp-cover'].forEach(id => { const el = document.getElementById(id); if (el) el.src = currentSong.cover; });

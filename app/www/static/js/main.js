@@ -1,4 +1,4 @@
-import { state, persistState } from './state.js';
+import { state, persistState, saveCacheSettings } from './state.js';
 import { ui } from './ui.js';
 import { autoResizeUI, showToast, persistOnUnload, showConfirmDialog } from './utils.js';
 import { api } from './api.js';
@@ -6,11 +6,118 @@ import { initNetease } from './netease.js';
 import { initMounts, loadMountPoints, startScanPolling } from './mounts.js';
 import { initPlayer, loadSongs, performDelete, handleExternalFile, renderPlaylist, switchTab } from './player.js';
 import { batchManager } from './batch-manager.js';
-import { checkAndMigrateData } from './db.js';
+import { checkAndMigrateData, cleanupOldData, cleanupOldCovers, cleanupOldPlaylistCache } from './db.js';
+
+// 离线状态指示器
+let offlineIndicator = null;
+
+// Service Worker 注册和注销函数
+async function registerServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    try {
+      const registration = await navigator.serviceWorker.register('/static/js/service-worker.js', { scope: '/' });
+      console.log('[Main] Service Worker 注册成功 - 离线支持已启用');
+      
+      // 监听更新
+      registration.addEventListener('updatefound', () => {
+        const newWorker = registration.installing;
+        newWorker?.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            console.log('[Main] Service Worker 更新可用');
+            showToast('应用已更新，刷新页面以获取最新版本', 'info');
+          }
+        });
+      });
+    } catch (err) {
+      console.warn('[Main] Service Worker 注册失败:', err.message);
+    }
+  }
+}
+
+async function unregisterServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for (const registration of registrations) {
+        await registration.unregister();
+      }
+      console.log('[Main] Service Worker 已注销 - 离线支持已禁用');
+      
+      // 清理 Service Worker 缓存
+      if ('caches' in window) {
+        try {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(key => caches.delete(key)));
+          console.log('[Main] Service Worker 缓存已清理');
+        } catch (e) {
+          console.error('[Main] 清理 Service Worker 缓存失败:', e);
+        }
+      }
+    } catch (err) {
+      console.warn('[Main] Service Worker 注销失败:', err.message);
+    }
+  }
+}
+
+function setupOfflineIndicator() {
+  // 监听网络状态变化
+  window.addEventListener('networkStatusChanged', (event) => {
+    const isOnline = event.detail.isOnline;
+    updateOfflineIndicator(isOnline);
+  });
+  
+  // 初始化离线指示器
+  updateOfflineIndicator(navigator.onLine);
+}
+
+function updateOfflineIndicator(isOnline) {
+  if (!offlineIndicator) {
+    // 创建离线指示器
+    offlineIndicator = document.createElement('div');
+    offlineIndicator.id = 'offline-indicator';
+    offlineIndicator.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(90deg, #ff6b6b, #ee5a6f);
+      color: white;
+      padding: 12px 20px;
+      text-align: center;
+      font-weight: bold;
+      z-index: 10000;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      display: none;
+      transition: all 0.3s ease;
+    `;
+    document.body.insertBefore(offlineIndicator, document.body.firstChild);
+  }
+  
+  if (isOnline) {
+    offlineIndicator.style.display = 'none';
+    offlineIndicator.textContent = '';
+    showToast('✓ 网络已恢复，数据同步中...', 'success');
+  } else {
+    offlineIndicator.style.display = 'block';
+    offlineIndicator.innerHTML = '⚠️ 当前离线 - 使用本地缓存数据';
+  }
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // 设置离线指示器
+  setupOfflineIndicator();
+  
   // 0. IndexedDB 初始化与数据迁移检查 (后台异步执行)
   checkAndMigrateData().catch(e => console.error('[主程序] 数据迁移检查失败:', e));
+
+  // 0.5. 执行定期清理（后台异步执行，不阻塞UI）
+  setTimeout(async () => {
+    try {
+      await import('./db.js').then(mod => mod.performAllCleanup());
+    } catch (e) {
+      console.warn('[主程序] 定期清理失败:', e);
+    }
+  }, 5000); // 5秒后执行，让应用先初始化完成
 
   // 版本检查
   try {
@@ -264,25 +371,88 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         sessionStorage.clear();
 
-        // 2. Clear Cookies
+        // 2. Clear IndexedDB
+        if ('indexedDB' in window) {
+          try {
+            const dbs = await indexedDB.databases?.() || [];
+            for (const db of dbs) {
+              if (db.name === '2FMusicDB') {
+                indexedDB.deleteDatabase(db.name);
+                console.log('[Clear Cache] 已删除 IndexedDB:', db.name);
+              }
+            }
+          } catch (e) {
+            console.warn('[Clear Cache] 清理 IndexedDB 失败:', e);
+          }
+        }
+
+        // 3. Clear Cookies
         document.cookie.split(";").forEach((c) => {
           document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
         });
 
-        // 3. Clear Cache Storage (Service Workers)
+        // 4. Clear Cache Storage (Service Workers)
         if ('caches' in window) {
           try {
             const keys = await caches.keys();
             await Promise.all(keys.map(key => caches.delete(key)));
+            console.log('[Clear Cache] 已清理 Service Worker 缓存');
           } catch (e) {
-            console.error("Failed to clear caches:", e);
+            console.error("[Clear Cache] 清理 Service Worker 缓存失败:", e);
           }
         }
 
-        // 4. Force Reload
+        // 5. Force Reload
         location.reload(true);
       });
     });
+
+    // 缓存设置
+    const cacheCoversCheckbox = document.getElementById('setting-cache-covers');
+    const cacheLyricsCheckbox = document.getElementById('setting-cache-lyrics');
+    const offlineSupportCheckbox = document.getElementById('setting-offline-support');
+    
+    // 调试日志：确认初始状态
+    console.log('[Settings] 初始状态 - cacheCovers:', state.cacheCovers, 'cacheLyrics:', state.cacheLyrics, 'offlineSupport:', state.offlineSupport);
+    
+    if (cacheCoversCheckbox) {
+      cacheCoversCheckbox.checked = state.cacheCovers;
+      cacheCoversCheckbox.addEventListener('change', () => {
+        state.cacheCovers = cacheCoversCheckbox.checked;
+        saveCacheSettings();
+        console.log('[Settings] 缓存封面已', cacheCoversCheckbox.checked ? '启用' : '禁用', '- 状态:', state.cacheCovers);
+        showToast(cacheCoversCheckbox.checked ? '✓ 已启用封面缓存' : '✓ 已禁用封面缓存');
+      });
+    }
+    
+    if (cacheLyricsCheckbox) {
+      cacheLyricsCheckbox.checked = state.cacheLyrics;
+      cacheLyricsCheckbox.addEventListener('change', () => {
+        state.cacheLyrics = cacheLyricsCheckbox.checked;
+        saveCacheSettings();
+        console.log('[Settings] 缓存歌词已', cacheLyricsCheckbox.checked ? '启用' : '禁用', '- 状态:', state.cacheLyrics);
+        showToast(cacheLyricsCheckbox.checked ? '✓ 已启用歌词缓存' : '✓ 已禁用歌词缓存');
+      });
+    }
+    
+    if (offlineSupportCheckbox) {
+      offlineSupportCheckbox.checked = state.offlineSupport;
+      offlineSupportCheckbox.addEventListener('change', async () => {
+        state.offlineSupport = offlineSupportCheckbox.checked;
+        saveCacheSettings();
+        console.log('[Settings] 离线支持已', offlineSupportCheckbox.checked ? '启用' : '禁用', '- 状态:', state.offlineSupport);
+        
+        if (state.offlineSupport) {
+          // 启用离线支持 - 注册 Service Worker
+          await registerServiceWorker();
+          showToast('✓ 离线支持已启用，需重新加载页面以生效', 'info');
+        } else {
+          // 禁用离线支持 - 注销 Service Worker
+          await unregisterServiceWorker();
+          showToast('✓ 离线支持已禁用，需重新加载页面以生效', 'info');
+        }
+      });
+    }
 
     // Logout
     document.getElementById('setting-logout')?.addEventListener('click', () => {
@@ -318,26 +488,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadMountPoints();
   startScanPolling(false, (r) => loadSongs(r, false), loadMountPoints);
 
-  // 注册 Service Worker（为PWA提供离线支持和资源缓存）
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/static/js/service-worker.js', { scope: '/' })
-      .then((registration) => {
-        console.log('[Main] Service Worker 注册成功 - PWA离线支持已启用');
-        
-        // 监听更新
-        registration.addEventListener('updatefound', () => {
-          const newWorker = registration.installing;
-          newWorker?.addEventListener('statechange', () => {
-            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              console.log('[Main] Service Worker 更新可用');
-              showToast('应用已更新，刷新页面以获取最新版本', 'info');
-            }
-          });
-        });
-      })
-      .catch((err) => {
-        console.warn('[Main] Service Worker 注册失败，PWA离线功能不可用:', err.message);
-        // Service Worker 失败不影响应用正常使用
-      });
+  // 根据设置决定是否注册 Service Worker（为PWA提供离线支持和资源缓存）
+  if (state.offlineSupport !== false) {
+    await registerServiceWorker();
+  } else {
+    await unregisterServiceWorker();
   }
 });
