@@ -342,17 +342,29 @@ def static_url(filename):
 # 拦截静态文件请求，确保所有静态资源都有版本参数
 @app.before_request
 def ensure_static_version():
-    """确保所有静态资源请求都带有版本参数"""
+    """确保所有静态资源请求都带有版本参数（某些文件除外）"""
     if request.path.startswith('/static/'):
+        # 不能通过重定向加载的资源和Service Worker不应该缓存的资源
+        # 这些文件应该直接返回或由应用直接请求带版本号的URL
+        excluded_patterns = [
+            'service-worker.js',
+            'manifest.json',
+        ]
+        
+        filename = request.path.replace('/static/', '', 1).split('?')[0]
+        
+        # 如果是排除的文件，不做重定向
+        if any(filename.endswith(f) for f in excluded_patterns):
+            return None
+        
         # 如果请求没有版本参数，重定向到带有版本参数的URL
         if 'v' not in request.args:
-            # 从请求路径中提取文件名
-            filename = request.path.replace('/static/', '', 1)
             # 计算文件的MD5值
             file_path = os.path.join(STATIC_DIR, filename)
-            md5_value = get_file_md5(file_path)
-            # 重定向到带有MD5版本参数的URL
-            return redirect(request.path + '?v=' + md5_value)
+            if os.path.exists(file_path):
+                md5_value = get_file_md5(file_path)
+                # 重定向到带有MD5版本参数的URL
+                return redirect(request.path + '?v=' + md5_value)
 
 @app.route('/favicon.ico')
 def favicon():
@@ -420,6 +432,11 @@ def add_cors_headers(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
     response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    
+    # 为Service Worker脚本添加特殊头，允许全局scope
+    if request.path.endswith('service-worker.js'):
+        response.headers['Service-Worker-Allowed'] = '/'
+    
     return response
 
 @app.route('/login', methods=['GET', 'POST'])

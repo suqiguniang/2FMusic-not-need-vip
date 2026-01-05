@@ -21,6 +21,7 @@ export const ui = {
 
   navLocal: document.getElementById('nav-local'),
   navFav: document.getElementById('nav-fav'),
+  navHotlist: document.getElementById('nav-hotlist'),
   navMount: document.getElementById('nav-mount'),
   navNetease: document.getElementById('nav-netease'),
   navUpload: document.getElementById('nav-upload'),

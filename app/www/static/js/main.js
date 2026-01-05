@@ -6,8 +6,12 @@ import { initNetease } from './netease.js';
 import { initMounts, loadMountPoints, startScanPolling } from './mounts.js';
 import { initPlayer, loadSongs, performDelete, handleExternalFile, renderPlaylist, switchTab } from './player.js';
 import { batchManager } from './batch-manager.js';
+import { checkAndMigrateData } from './db.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // 0. IndexedDB 初始化与数据迁移检查 (后台异步执行)
+  checkAndMigrateData().catch(e => console.error('[主程序] 数据迁移检查失败:', e));
+
   // 版本检查
   try {
     const VERSION_STORAGE_KEY = 'app_version';
@@ -179,6 +183,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 其他导航：回到播放器或对应视图
   if (ui.navLocal) ui.navLocal.addEventListener('click', () => { switchTab('local'); });
   if (ui.navFav) ui.navFav.addEventListener('click', () => { switchTab('fav'); });
+  if (ui.navHotlist) ui.navHotlist.addEventListener('click', () => { switchTab('hotlist'); });
   if (ui.navMount) ui.navMount.addEventListener('click', () => { switchTab('mount'); });
   if (ui.navNetease) ui.navNetease.addEventListener('click', () => { switchTab('netease'); });
   if (ui.navSettings) ui.navSettings.addEventListener('click', () => { switchTab('settings'); });
@@ -312,4 +317,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initNetease(loadSongs);
   loadMountPoints();
   startScanPolling(false, (r) => loadSongs(r, false), loadMountPoints);
+
+  // 注册 Service Worker（为PWA提供离线支持和资源缓存）
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/static/js/service-worker.js', { scope: '/' })
+      .then((registration) => {
+        console.log('[Main] Service Worker 注册成功 - PWA离线支持已启用');
+        
+        // 监听更新
+        registration.addEventListener('updatefound', () => {
+          const newWorker = registration.installing;
+          newWorker?.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              console.log('[Main] Service Worker 更新可用');
+              showToast('应用已更新，刷新页面以获取最新版本', 'info');
+            }
+          });
+        });
+      })
+      .catch((err) => {
+        console.warn('[Main] Service Worker 注册失败，PWA离线功能不可用:', err.message);
+        // Service Worker 失败不影响应用正常使用
+      });
+  }
 });

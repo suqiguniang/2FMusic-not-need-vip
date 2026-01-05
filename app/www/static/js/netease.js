@@ -65,6 +65,18 @@ function setPlayButton(btnEl, song) {
   btnEl.onclick = () => playDownloadedSong(song);
 }
 
+// Cache download tasks to localStorage for quick preload
+function cacheDownloadTasks() {
+  try {
+    // Only cache active/recent tasks to keep size manageable
+    const MAX_CACHE = 100;
+    const tasksToCache = state.neteaseDownloadTasks.slice(0, MAX_CACHE);
+    localStorage.setItem('2fmusic_netease_download_tasks', JSON.stringify(tasksToCache));
+  } catch (e) {
+    console.warn('Failed to cache download tasks:', e);
+  }
+}
+
 function renderDownloadTasks() {
   const list = ui.neteaseDownloadList;
   const tasks = state.neteaseDownloadTasks;
@@ -150,6 +162,10 @@ function addDownloadTask(song, status = 'queued') {
       }
     }
   }
+  
+  // Cache download tasks for quick preload on next page load
+  cacheDownloadTasks();
+  
   renderDownloadTasks();
   return task.id;
 }
@@ -158,6 +174,10 @@ function updateDownloadTask(id, status) {
   const task = state.neteaseDownloadTasks.find(t => t.id === id);
   if (task) {
     task.status = status;
+    
+    // Cache download tasks when status changes
+    cacheDownloadTasks();
+    
     renderDownloadTasks();
   }
 }
@@ -545,12 +565,42 @@ async function searchNeteaseSongs() {
 
 async function loadDailyRecommendations(forceReload = false) {
   if (recommendLoading) return;
+  
+  // Check if we have cached recommendations for today
   if (!forceReload && state.neteaseRecommendations.length) {
     state.neteaseResults = state.neteaseRecommendations;
     state.neteaseResultSource = 'recommend';
     state.neteaseSelected = new Set();
     renderNeteaseResults();
     return;
+  }
+
+  // Try to load cached recommendations if available (even if empty array)
+  if (!forceReload) {
+    try {
+      const cachedRecommend = localStorage.getItem('2fmusic_netease_recommend');
+      if (cachedRecommend) {
+        const cacheData = JSON.parse(cachedRecommend);
+        const today = new Date().toDateString();
+        
+        // Check if cache is from today
+        if (cacheData.date === today && cacheData.data && Array.isArray(cacheData.data)) {
+          state.neteaseRecommendations = cacheData.data;
+          state.neteaseResults = state.neteaseRecommendations;
+          state.neteaseResultSource = 'recommend';
+          state.neteaseSelected = new Set();
+          renderNeteaseResults();
+          
+          // Background refresh (don't block UI)
+          loadDailyRecommendations(true).catch(() => {
+            // Silent fail - keep showing cached results
+          });
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load cached recommendations:', e);
+    }
   }
 
   recommendLoading = true;
@@ -567,6 +617,18 @@ async function loadDailyRecommendations(forceReload = false) {
     const json = await api.netease.recommend();
     if (json.success) {
       state.neteaseRecommendations = json.data || [];
+      
+      // Cache recommendations with date
+      try {
+        localStorage.setItem('2fmusic_netease_recommend', JSON.stringify({
+          date: new Date().toDateString(),
+          data: state.neteaseRecommendations,
+          timestamp: Date.now()
+        }));
+      } catch (e) {
+        console.warn('Failed to cache recommendations:', e);
+      }
+      
       state.neteaseResults = state.neteaseRecommendations;
       state.neteaseResultSource = 'recommend';
       state.neteaseSelected = new Set();
@@ -598,28 +660,62 @@ async function loadDailyRecommendations(forceReload = false) {
 
 async function loadNeteaseConfig() {
   let apiBase = 'http://localhost:23236'; // Default
+  let downloadDir = '';
+  
+  // 1. Try to use cached config first (for instant UI update)
+  const cachedConfig = localStorage.getItem('2fmusic_netease_config');
+  if (cachedConfig) {
+    try {
+      const config = JSON.parse(cachedConfig);
+      if (config.api_base) apiBase = config.api_base;
+      if (config.download_dir) downloadDir = config.download_dir;
+      
+      // Update UI immediately with cached values
+      if (ui.neteaseDownloadDirInput) ui.neteaseDownloadDirInput.value = downloadDir;
+      if (ui.neteaseApiSettingsInput) ui.neteaseApiSettingsInput.value = apiBase;
+      if (ui.neteaseApiGateInput) ui.neteaseApiGateInput.value = apiBase;
+    } catch (e) {
+      console.warn('Failed to parse cached netease config:', e);
+    }
+  }
 
+  // Update State with cached or default values
+  state.neteaseApiBase = apiBase;
+  state.neteaseDownloadDir = downloadDir;
+  state.neteaseMaxConcurrent = 20;
+
+  // 2. Background fetch to get latest config and validate connection
   try {
     const json = await api.netease.configGet();
     if (json.success) {
-      if (json.api_base) apiBase = json.api_base;
-      state.neteaseDownloadDir = json.download_dir || '';
-      state.neteaseMaxConcurrent = 20;
-      state.neteaseMaxConcurrent = 20;
-
-      if (ui.neteaseDownloadDirInput) ui.neteaseDownloadDirInput.value = state.neteaseDownloadDir;
-      if (ui.neteaseApiSettingsInput) ui.neteaseApiSettingsInput.value = apiBase;
+      const newApiBase = json.api_base || apiBase;
+      const newDownloadDir = json.download_dir || downloadDir;
+      
+      // Only update UI if values changed (avoid unnecessary re-renders)
+      if (newApiBase !== apiBase || newDownloadDir !== downloadDir) {
+        apiBase = newApiBase;
+        downloadDir = newDownloadDir;
+        
+        if (ui.neteaseDownloadDirInput) ui.neteaseDownloadDirInput.value = downloadDir;
+        if (ui.neteaseApiSettingsInput) ui.neteaseApiSettingsInput.value = apiBase;
+        if (ui.neteaseApiGateInput) ui.neteaseApiGateInput.value = apiBase;
+      }
+      
+      // Cache the config for next time
+      localStorage.setItem('2fmusic_netease_config', JSON.stringify({
+        api_base: apiBase,
+        download_dir: downloadDir
+      }));
     }
   } catch (err) {
-    console.warn('Config load failed, utilizing default:', err);
+    console.warn('Config load failed, utilizing cached or default:', err);
   }
 
-  // Update State & UI
+  // Update State (again with potentially updated values)
   state.neteaseApiBase = apiBase;
-  if (ui.neteaseApiGateInput) ui.neteaseApiGateInput.value = apiBase;
-  if (ui.neteaseApiSettingsInput) ui.neteaseApiSettingsInput.value = apiBase;
+  state.neteaseDownloadDir = downloadDir;
 
-  // Auto-Connect Attempt
+  // 3. Auto-Connect Attempt
   try {
     const statusJson = await api.netease.loginStatus();
     if (statusJson.success) {
@@ -660,6 +756,12 @@ async function saveNeteaseConfig() {
       if (ui.neteaseApiGateInput) ui.neteaseApiGateInput.value = state.neteaseApiBase || 'http://localhost:23236';
       if (ui.neteaseApiSettingsInput) ui.neteaseApiSettingsInput.value = state.neteaseApiBase || 'http://localhost:23236';
 
+      // Cache the config for next time
+      localStorage.setItem('2fmusic_netease_config', JSON.stringify({
+        api_base: state.neteaseApiBase,
+        download_dir: state.neteaseDownloadDir
+      }));
+
       processDownloadQueue();
       toggleNeteaseGate(!!state.neteaseApiBase);
       showToast('保存成功');
@@ -684,6 +786,13 @@ async function bindNeteaseApi() {
     if (json.success) {
       state.neteaseApiBase = json.api_base;
       if (ui.neteaseApiSettingsInput) ui.neteaseApiSettingsInput.value = state.neteaseApiBase || '';
+      
+      // Cache the config for next time
+      localStorage.setItem('2fmusic_netease_config', JSON.stringify({
+        api_base: state.neteaseApiBase,
+        download_dir: state.neteaseDownloadDir
+      }));
+      
       const statusJson = await api.netease.loginStatus();
       if (statusJson.success) {
         showToast('连接成功');
@@ -1041,6 +1150,32 @@ export async function initNetease(onRefreshSongs) {
       }
     }
   } catch (e) { console.error('Cache load error', e); }
+
+  // 1.5 Load cached download tasks
+  try {
+    const cachedTasks = localStorage.getItem('2fmusic_netease_download_tasks');
+    if (cachedTasks) {
+      const tasks = JSON.parse(cachedTasks);
+      if (Array.isArray(tasks) && tasks.length > 0) {
+        state.neteaseDownloadTasks = tasks;
+        // Render tasks immediately (before main content loads)
+        renderDownloadTasks();
+      }
+    }
+  } catch (e) { console.error('Failed to load cached download tasks:', e); }
+
+  // 1.6 Load cached daily recommendations (today's only)
+  try {
+    const cachedRecommend = localStorage.getItem('2fmusic_netease_recommend');
+    if (cachedRecommend) {
+      const cacheData = JSON.parse(cachedRecommend);
+      const today = new Date().toDateString();
+      // Load if cache is from today
+      if (cacheData.date === today && cacheData.data && Array.isArray(cacheData.data)) {
+        state.neteaseRecommendations = cacheData.data;
+      }
+    }
+  } catch (e) { console.error('Failed to load cached recommendations:', e); }
 
   // 2. Background Validation
   await loadNeteaseConfig();

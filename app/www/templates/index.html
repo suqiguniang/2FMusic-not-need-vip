@@ -43,7 +43,7 @@
 
 
     <link rel="icon" href="{{ 'images/ICON_256.PNG' | static_url }}">
-    <script src="{{ 'js/lib/color-thief.umd.js' | static_url }}"></script>
+    <script async src="{{ 'js/lib/color-thief.umd.js' | static_url }}"></script>
     <link rel="stylesheet" href="{{ 'css/font-awesome/all.min.css' | static_url }}">
     <link rel="stylesheet" href="{{ 'css/style.css' | static_url }}">
     <link rel="stylesheet" href="{{ 'css/favorites.css' | static_url }}">
@@ -52,6 +52,28 @@
 </head>
 
 <body>
+    <script>
+        // 预加载排序状态到全局变量，避免刷新时排序闪烁
+        window.__PRELOAD_SORT_STATE__ = (() => {
+            try {
+                const state = JSON.parse(localStorage.getItem('2fmusic_state') || '{}');
+                return {
+                    currentSort: state.currentSort || 'title',
+                    sortOrder: state.sortOrder || 'asc'
+                };
+            } catch(e) {
+                return { currentSort: 'title', sortOrder: 'asc' };
+            }
+        })();
+    </script>
+    
+    <!-- 立即隐藏复选框和收藏按钮，防止页面刷新时闪现 -->
+    <style>
+        .song-checkbox,
+        .card-fav-btn {
+            display: none !important;
+        }
+    </style>
 
     <div id="app">
         <aside id="sidebar" class="glass-panel">
@@ -66,6 +88,7 @@
                 <ul>
                     <li class="active" id="nav-local"><i class="fas fa-music"></i> <span>本地音乐</span></li>
                     <li id="nav-fav"><i class="fas fa-heart"></i> <span>我的收藏</span></li>
+                    <li id="nav-hotlist"><i class="fas fa-history"></i> <span>播放记录</span></li>
                     <li id="nav-mount"><i class="fas fa-network-wired"></i> <span>目录管理</span></li>
                     <li id="nav-netease"><i class="fas fa-cloud-download-alt"></i> <span>网易下载</span></li>
                     <li id="nav-upload"><i class="fas fa-cloud-upload-alt"></i> <span>上传音乐</span></li>
@@ -118,8 +141,38 @@
                                     <div class="sort-option" data-sort="mtime">
                                         <i class="fas fa-clock"></i> 入库时间
                                     </div>
+                                    <div class="sort-option" data-sort="playCount">
+                                        <i class="fas fa-play"></i> 播放频率
+                                    </div>
                                 </div>
                             </div>
+                            <script>
+                                // 在btn-sort加载完成后立即应用预加载的排序状态
+                                if (window.__PRELOAD_SORT_STATE__) {
+                                    const sortState = window.__PRELOAD_SORT_STATE__;
+                                    const SORT_CONFIG = {
+                                        'title': { label: '标题', icon: 'fa-sort-alpha-down' },
+                                        'artist': { label: '歌手', icon: 'fa-user' },
+                                        'album': { label: '专辑', icon: 'fa-compact-disc' },
+                                        'mtime': { label: '时间', icon: 'fa-clock' },
+                                        'size': { label: '大小', icon: 'fa-database' },
+                                        'playCount': { label: '频率', icon: 'fa-play' }
+                                    };
+                                    const config = SORT_CONFIG[sortState.currentSort] || SORT_CONFIG['title'];
+                                    
+                                    const btnSort = document.getElementById('btn-sort');
+                                    if (btnSort) {
+                                        btnSort.innerHTML = `<i class="fas ${config.icon}"></i> ${config.label}`;
+                                    }
+                                    
+                                    const sortDropdown = document.getElementById('sort-dropdown');
+                                    if (sortDropdown) {
+                                        sortDropdown.querySelectorAll('.sort-option').forEach(option => {
+                                            option.classList.toggle('active', option.dataset.sort === sortState.currentSort);
+                                        });
+                                    }
+                                }
+                            </script>
                         </div>
                     </div>
                     <!-- 右键菜单 -->
@@ -588,35 +641,13 @@
                     }
                 }
 
-                // 5. Update Sort Button
+                // 5. Prepare Sort State (will be used by main.js to update button)
                 const savedState = JSON.parse(localStorage.getItem('2fmusic_state') || '{}');
                 const currentSort = savedState.currentSort || 'title';
                 const sortOrder = savedState.sortOrder || 'asc';
-
-                const btnSort = document.getElementById('btn-sort');
-                if (btnSort) {
-                    // 获取当前排序类型的文本
-                    let sortText = '标题';
-                    switch (currentSort) {
-                        case 'title':
-                            sortText = '标题';
-                            break;
-                        case 'artist':
-                            sortText = '歌手';
-                            break;
-                        case 'album':
-                            sortText = '专辑';
-                            break;
-                        case 'mtime':
-                            sortText = '时间';
-                            break;
-                    }
-
-                    // 更新按钮文本
-                    btnSort.innerHTML = `
-                        <i class="fas fa-sort"></i> ${sortText}
-                    `;
-                }
+                
+                // Mark sort state for main.js to use immediately
+                window._sortStateReady = { currentSort, sortOrder };
 
                 // 6. Pre-render Song List (Minimize Flicker)
                 if (tab === 'local' || tab === 'fav') {
@@ -779,6 +810,96 @@
                         });
                     }
                 }
+
+                // 7. Restore Netease User Info (Optimistic UI)
+                try {
+                    const neteaseUserSaved = localStorage.getItem('2fmusic_netease_user');
+                    if (neteaseUserSaved) {
+                        const user = JSON.parse(neteaseUserSaved);
+                        if (user && user.nickname) {
+                            // Show user display section
+                            const userDisplay = document.getElementById('netease-user-display');
+                            const loginBtn = document.getElementById('netease-login-btn-top');
+                            if (userDisplay) userDisplay.classList.remove('hidden');
+                            if (loginBtn) loginBtn.classList.add('hidden');
+
+                            // Restore user info
+                            const userNameEl = document.getElementById('netease-user-name');
+                            const userAvatarEl = document.getElementById('netease-user-avatar');
+                            const vipBadgeEl = document.getElementById('netease-vip-badge');
+                            if (userNameEl) userNameEl.innerText = user.nickname || 'User';
+                            if (userAvatarEl) userAvatarEl.src = user.avatar || '';
+                            if (vipBadgeEl && user.isVip) vipBadgeEl.classList.remove('hidden');
+                        }
+                    }
+                } catch (e) { console.error('Netease user preload error', e); }
+
+                // 8. Restore Cached Playlists (for favorites tab)
+                try {
+                    if (tab === 'fav') {
+                        const playlistsCache = JSON.parse(localStorage.getItem('2fmusic_cached_playlists') || '[]');
+                        const playlistSongsCache = JSON.parse(localStorage.getItem('2fmusic_cached_playlist_songs') || '{}');
+                        
+                        // If viewing a specific playlist, try to preload its cached songs
+                        if (state.selectedPlaylistId && playlistSongsCache[state.selectedPlaylistId]) {
+                            // Cache available, can be rendered faster when main.js loads
+                            // Store flag to signal preload was available
+                            window._playlistPreloadReady = true;
+                        }
+                        
+                        // If cache is empty, at least ensure UI is ready for loading
+                        if (playlistsCache.length === 0 && !state.selectedPlaylistId) {
+                            const titleEl = document.getElementById('list-title');
+                            if (titleEl) titleEl.innerText = '收藏列表';
+                        }
+                    }
+                } catch (e) { console.error('Playlist cache preload error', e); }
+
+                // 9. Pre-render Mount Points skeleton (if on mount tab)
+                try {
+                    if (tab === 'mount') {
+                        const mountContainer = document.getElementById('mount-list-container');
+                        if (mountContainer) {
+                            // Try to load cached mount points for faster display
+                            const savedScraped = localStorage.getItem('scrapedPaths');
+                            if (savedScraped) {
+                                try {
+                                    const scrapedPaths = JSON.parse(savedScraped);
+                                    if (Array.isArray(scrapedPaths) && scrapedPaths.length > 0) {
+                                        // Preload mount points from cache (array of [path, data])
+                                        let html = '';
+                                        scrapedPaths.forEach(([path]) => {
+                                            html += `
+                                                <div class="mount-card" data-mount-path="${path}">
+                                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                                        <div class="mount-info">
+                                                            <i class="fas fa-folder mount-icon"></i>
+                                                            <span class="mount-path-text">${path}</span>
+                                                        </div>
+                                                        <div style="display: flex; gap: 0.5rem;">
+                                                            <button class="btn-update-mount">更新</button>
+                                                            <button class="btn-remove-mount">移除</button>
+                                                        </div>
+                                                    </div>
+                                                    <div class="mount-card-progress" style="margin-top: 0.8rem;">
+                                                        <div class="progress-bar"></div>
+                                                    </div>
+                                                </div>
+                                            `;
+                                        });
+                                        if (html) {
+                                            mountContainer.innerHTML = html;
+                                        }
+                                    } else if (mountContainer.querySelector('.loading')) {
+                                        // Keep loading state if cache is empty
+                                    }
+                                } catch (e) {
+                                    console.warn('Failed to parse scrapedPaths cache:', e);
+                                }
+                            }
+                        }
+                    }
+                } catch (e) { console.error('Mount preload error', e); }
 
             } catch (e) { console.error('Fast init error', e); }
         })();

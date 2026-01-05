@@ -15,56 +15,77 @@ export function clearPlaylistCache() {
   localStorage.setItem('2fmusic_cached_playlist_songs', JSON.stringify({}));
 }
 
-// 加载收藏夹筛选列表
+// 加载收藏夹筛选列表 (带缓存优化)
 export async function loadPlaylistFilter() {
   if (!ui.playlistFilter) return;
   
   try {
-    // 优先使用本地缓存数据
+    // 优先使用本地缓存数据 - 立即显示
     let playlists = state.cachedPlaylists;
+    let isUsingCache = playlists.length > 0;
     
-    // 如果缓存中没有数据或数据为空，从API获取
-    if (playlists.length === 0) {
-      const res = await api.favoritePlaylists.list();
-      if (res && res.data) {
-        playlists = res.data;
-      }
+    // 渲染缓存数据（如果有）
+    if (isUsingCache) {
+      renderPlaylistFilterOptions(playlists);
     }
     
-    if (playlists.length > 0) {
-      // 去重处理
-      const uniquePlaylists = [];
-      const seenIds = new Set();
-      
-      playlists.forEach(playlist => {
-        if (!seenIds.has(playlist.id)) {
-          seenIds.add(playlist.id);
-          uniquePlaylists.push(playlist);
+    // 后台获取最新数据（即使有缓存也要更新）
+    try {
+      const res = await api.favoritePlaylists.list();
+      if (res && res.data) {
+        const newPlaylists = res.data;
+        // 只有在数据不同时才重新渲染
+        const hasChanged = newPlaylists.length !== playlists.length || 
+          newPlaylists.some((p, i) => !playlists[i] || p.id !== playlists[i].id);
+        if (hasChanged) {
+          renderPlaylistFilterOptions(newPlaylists);
+          saveCachedPlaylists(newPlaylists);
         }
-      });
-      
-      // 对收藏夹进行排序：默认收藏夹排第一位，其他按名称排序
-      const sortedPlaylists = uniquePlaylists.sort((a, b) => {
-        // 默认收藏夹排第一位
-        if (a.name === '默认收藏夹' && b.name !== '默认收藏夹') return -1;
-        if (a.name !== '默认收藏夹' && b.name === '默认收藏夹') return 1;
-        // 其他收藏夹按名称排序
-        return a.name.localeCompare(b.name);
-      });
-      
-      // 清空现有选项，保留"所有收藏夹"
-      ui.playlistFilter.innerHTML = '<option value="">所有收藏夹</option>';
-      
-      // 添加收藏夹选项
-      sortedPlaylists.forEach(playlist => {
-        const option = document.createElement('option');
-        option.value = playlist.id;
-        option.textContent = playlist.name;
-        ui.playlistFilter.appendChild(option);
-      });
+      }
+    } catch (e) {
+      // 后台更新失败，继续使用缓存
+      console.warn('Failed to fetch latest playlists:', e);
     }
   } catch (e) {
     console.error('加载收藏夹列表失败:', e);
+  }
+}
+
+// 渲染收藏夹筛选选项 (独立函数，便于复用)
+function renderPlaylistFilterOptions(playlists) {
+  if (!ui.playlistFilter || !Array.isArray(playlists)) return;
+  
+  if (playlists.length > 0) {
+    // 去重处理
+    const uniquePlaylists = [];
+    const seenIds = new Set();
+    
+    playlists.forEach(playlist => {
+      if (!seenIds.has(playlist.id)) {
+        seenIds.add(playlist.id);
+        uniquePlaylists.push(playlist);
+      }
+    });
+    
+    // 对收藏夹进行排序：默认收藏夹排第一位，其他按名称排序
+    const sortedPlaylists = uniquePlaylists.sort((a, b) => {
+      // 默认收藏夹排第一位
+      if (a.name === '默认收藏夹' && b.name !== '默认收藏夹') return -1;
+      if (a.name !== '默认收藏夹' && b.name === '默认收藏夹') return 1;
+      // 其他收藏夹按名称排序
+      return a.name.localeCompare(b.name);
+    });
+    
+    // 清空现有选项，保留"所有收藏夹"
+    ui.playlistFilter.innerHTML = '<option value="">所有收藏夹</option>';
+    
+    // 添加收藏夹选项
+    sortedPlaylists.forEach(playlist => {
+      const option = document.createElement('option');
+      option.value = playlist.id;
+      option.textContent = playlist.name;
+      ui.playlistFilter.appendChild(option);
+    });
   }
 }
 

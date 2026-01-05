@@ -576,6 +576,40 @@ body::before {
     color: var(--text-sub);
 }
 
+/* 默认隐藏复选框和收藏按钮（动态显示时会改变） */
+.song-checkbox,
+.card-fav-btn {
+    display: none !important;
+}
+
+/* 播放次数徽章 */
+.play-count-badge {
+    position: absolute;
+    bottom: 0.6rem;
+    right: 0.6rem;
+    background: rgba(255, 255, 255, 0.15);
+    color: white;
+    font-size: 0.7rem;
+    padding: 0.2rem 0.35rem;
+    border-radius: 0.3rem;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    z-index: 8;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    letter-spacing: 0.01em;
+}
+
+.play-count-badge::before {
+    content: '▶';
+    font-size: 0.55rem;
+    margin-right: 0.05rem;
+    opacity: 0.8;
+}
+
 .card-fav-btn {
     position: absolute;
     top: 0.5rem;

@@ -95,6 +95,92 @@ export function persistState(audio, sortState = {}) {
     sortOrder: sortOrder || 'asc'
   };
   localStorage.setItem('2fmusic_state', JSON.stringify(nextState));
+
+  // 3. 记录播放历史 (最多保留100条)
+  if (currentSong && currentSong.filename) {
+    try {
+      const playHistory = JSON.parse(localStorage.getItem('2fmusic_play_history') || '[]');
+      const historyEntry = {
+        filename: currentSong.filename,
+        title: currentSong.title,
+        artist: currentSong.artist,
+        playedAt: new Date().toISOString(),
+        duration: audio?.duration || 0,
+        currentTime: audio?.currentTime || 0
+      };
+      
+      // 避免重复记录同一首歌 (5秒内的重复)
+      const lastEntry = playHistory[playHistory.length - 1];
+      if (!lastEntry || lastEntry.filename !== currentSong.filename || 
+          (Date.now() - new Date(lastEntry.playedAt).getTime()) > 5000) {
+        playHistory.push(historyEntry);
+        
+        // 只保留最近100条历史
+        if (playHistory.length > 100) {
+          playHistory.splice(0, playHistory.length - 100);
+        }
+        
+        localStorage.setItem('2fmusic_play_history', JSON.stringify(playHistory));
+      }
+    } catch (e) {
+      console.warn('Failed to save play history:', e);
+    }
+  }
+}
+
+// 记录歌曲收听统计 (用于个性化推荐)
+export function updateListenStats(song, listenTime = 0) {
+  if (!song || !song.filename) return;
+  
+  try {
+    const stats = JSON.parse(localStorage.getItem('2fmusic_listen_stats') || '{}');
+    const key = song.filename;
+    
+    // 初始化或更新统计
+    if (!stats[key]) {
+      stats[key] = {
+        filename: song.filename,
+        title: song.title,
+        artist: song.artist,
+        playCount: 0,
+        totalListenTime: 0,
+        lastListenTime: null,
+        averageListenPercent: 0
+      };
+    }
+    
+    const stat = stats[key];
+    stat.playCount = (stat.playCount || 0) + 1;
+    stat.totalListenTime = (stat.totalListenTime || 0) + listenTime;
+    stat.lastListenTime = new Date().toISOString();
+    
+    // 保存数据（最多1000条统计，保留热门歌曲）
+    const allStats = Object.values(stats);
+    if (allStats.length > 1000) {
+      // 按playCount降序排序，删除最少听的歌曲
+      allStats.sort((a, b) => (b.playCount || 0) - (a.playCount || 0));
+      allStats.splice(1000); // 保留前1000条
+      
+      const newStats = {};
+      allStats.forEach(s => newStats[s.filename] = s);
+      localStorage.setItem('2fmusic_listen_stats', JSON.stringify(newStats));
+    } else {
+      localStorage.setItem('2fmusic_listen_stats', JSON.stringify(stats));
+    }
+  } catch (e) {
+    console.warn('Failed to update listen stats:', e);
+  }
+}
+
+// 获取收听统计（用于排序或推荐）
+export function getListenStats(filename) {
+  try {
+    const stats = JSON.parse(localStorage.getItem('2fmusic_listen_stats') || '{}');
+    return stats[filename] || null;
+  } catch (e) {
+    console.warn('Failed to get listen stats:', e);
+    return null;
+  }
 }
 
 export function saveFavorites() {

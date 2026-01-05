@@ -146,14 +146,14 @@ export class BatchManager {
         checkbox.setAttribute('aria-label', '选择歌曲');
         card.insertBefore(checkbox, card.firstChild);
       }
-      checkbox.style.display = 'inline-block';
+      checkbox.style.setProperty('display', 'inline-block', 'important');
     });
   }
 
   // 动态隐藏复选框（当无选择时）
   hideCheckboxes() {
     document.querySelectorAll('.song-checkbox').forEach(checkbox => {
-      checkbox.style.display = 'none';
+      checkbox.style.setProperty('display', 'none', 'important');
     });
   }
 

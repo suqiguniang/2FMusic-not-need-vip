@@ -1,4 +1,4 @@
-import { state, persistState, saveFavorites, savePlaylist, saveCachedPlaylists, saveCachedPlaylistSongs } from './state.js';
+import { state, persistState, saveFavorites, savePlaylist, saveCachedPlaylists, saveCachedPlaylistSongs, updateListenStats, getListenStats } from './state.js';
 import { ui } from './ui.js';
 import { api } from './api.js';
 import { showToast, showConfirmDialog, hideProgressToast, updateDetailFavButton, formatTime, renderNoLyrics, updateSliderFill, flyToElement, throttle, extractColorFromImage } from './utils.js';
@@ -306,8 +306,17 @@ const SORT_CONFIG = {
   artist: { label: '歌手', icon: 'fa-user' },
   album: { label: '专辑', icon: 'fa-compact-disc' },
   mtime: { label: '时间', icon: 'fa-clock', defaultOrder: 'desc' }, // 默认由新到旧
-  size: { label: '大小', icon: 'fa-database', defaultOrder: 'desc' } // 默认由大到小
+  size: { label: '大小', icon: 'fa-database', defaultOrder: 'desc' }, // 默认由大到小
+  playCount: { label: '频率', icon: 'fa-play', defaultOrder: 'desc', fromStats: true } // 从收听统计获取
 };
+
+// 格式化播放次数显示 (大于等于1000时显示为"1.2K")
+function formatPlayCount(count) {
+  if (count >= 1000) {
+    return (count / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+  }
+  return count.toString();
+}
 
 // 获取排序方式的默认顺序
 function getDefaultSortOrder(sortType) {
@@ -340,6 +349,13 @@ function sortSongs(songs, sortType = state.currentSort, sortOrder = state.sortOr
         valueA = a.size || 0;
         valueB = b.size || 0;
         break;
+      case 'playCount':
+        // 从收听统计获取播放次数
+        const statsA = getListenStats(a.filename);
+        const statsB = getListenStats(b.filename);
+        valueA = (statsA && statsA.playCount) || 0;
+        valueB = (statsB && statsB.playCount) || 0;
+        break;
       default:
         valueA = (a.title || '').toLowerCase();
         valueB = (b.title || '').toLowerCase();
@@ -351,9 +367,48 @@ function sortSongs(songs, sortType = state.currentSort, sortOrder = state.sortOr
   });
 }
 
+// 获取热门歌曲列表 (按播放次数排序)
+function getHotlistSongs(songs, limit = 50) {
+  // 添加收听统计数据
+  const songsWithStats = songs.map(song => {
+    const stats = getListenStats(song.filename);
+    return {
+      ...song,
+      playCount: (stats && stats.playCount) || 0
+    };
+  });
+
+  // 按播放次数降序排序，过滤掉未听过的歌曲
+  return songsWithStats
+    .filter(s => s.playCount > 0)
+    .sort((a, b) => b.playCount - a.playCount)
+    .slice(0, limit);
+}
+
 // 更新排序按钮显示
 function updateSortButton() {
   if (!ui.btnSort) return;
+
+  // 检查按钮是否已经被HTML预加载设置过（包含非默认图标）
+  const hasPreload = ui.btnSort.innerHTML && !ui.btnSort.innerHTML.includes('fa-sort');
+  
+  // 如果已经被预加载设置过，且按钮内容已经包含正确的排序类型，就不再更新
+  if (hasPreload && ui.btnSort.innerHTML) {
+    const currentHtml = ui.btnSort.innerHTML;
+    const sortConfig = SORT_CONFIG[state.currentSort];
+    const expectedText = sortConfig ? sortConfig.label : '标题';
+    if (currentHtml.includes(expectedText)) {
+      // 仍然需要更新dropdown的active状态
+      document.querySelectorAll('.sort-option').forEach(option => {
+        if (option.dataset.sort === state.currentSort) {
+          option.classList.add('active');
+        } else {
+          option.classList.remove('active');
+        }
+      });
+      return;
+    }
+  }
 
   // 获取当前排序类型的文本
   const sortConfig = SORT_CONFIG[state.currentSort];
@@ -401,6 +456,22 @@ export function renderPlaylist() {
         isRendering = false;
       });
     }
+  } else if (state.currentTab === 'hotlist') {
+    // 播放记录页：显示播放过的歌曲，按播放次数降序
+    const hotlistSongs = getHotlistSongs(state.fullPlaylist, 500);
+    
+    // 设置displayPlaylist用于卡片索引
+    state.displayPlaylist = hotlistSongs;
+    
+    if (hotlistSongs.length === 0) {
+      ui.songContainer.className = 'song-list';
+      ui.songContainer.innerHTML = `<div class="loading-text" style="grid-column: 1/-1; padding: 4rem 0; font-size: 1.1rem; opacity: 0.6;">还没有播放过歌曲，开始播放来建立播放记录</div>`;
+    } else {
+      ui.songContainer.className = 'song-list';
+      // 不再排序，保持已排序的顺序
+      renderPlaylistSongs(hotlistSongs, true);
+    }
+    isRendering = false;
   } else {
     // 非收藏页，保持原有列表显示
     // 重置容器类名为默认的song-list，避免收藏页样式影响
@@ -974,14 +1045,14 @@ function renderPlaylistDetails(playlistId) {
 
 
 // 渲染歌曲列表
-export function renderPlaylistSongs(songs) {
+export function renderPlaylistSongs(songs, skipSort = false) {
   // 直接使用ui.songContainer，因为它已经有song-list类和网格布局
   const songListContainer = ui.songContainer;
 
   songListContainer.innerHTML = '';
 
-  // 应用排序
-  const sortedSongs = sortSongs(songs);
+  // 应用排序（除非跳过排序，如从热门歌曲页调用时）
+  const sortedSongs = skipSort ? songs : sortSongs(songs);
 
   if (sortedSongs.length === 0) {
     songListContainer.innerHTML = `<div class="loading-text" style="grid-column: 1/-1; padding: 4rem 0; font-size: 1.1rem; opacity: 0.6;">没有找到匹配的歌曲</div>`;
@@ -989,15 +1060,25 @@ export function renderPlaylistSongs(songs) {
   }
 
   const frag = document.createDocumentFragment();
-  sortedSongs.forEach((song) => {
+  sortedSongs.forEach((song, index) => {
     const card = document.createElement('div');
     card.className = 'song-card';
-    const songIndex = state.displayPlaylist.indexOf(song);
+    // 优先使用sortedSongs的索引，如果在displayPlaylist中则使用displayPlaylist索引
+    let songIndex = state.displayPlaylist.indexOf(song);
+    if (songIndex === -1) {
+      // 如果不在displayPlaylist中，使用在sortedSongs中的索引
+      songIndex = index;
+    }
     card.dataset.index = songIndex;
     if (song.isExternal) card.style.border = '1px dashed var(--primary)';
 
+    // 获取收听统计
+    const stats = getListenStats(song.filename);
+    // 只在播放次数大于等于1时显示徽章
+    const playCountBadge = stats && stats.playCount >= 1 ? `<span class="play-count-badge" title="已播放${stats.playCount}次">${formatPlayCount(stats.playCount)}</span>` : '';
+
     // 卡片内容（不包含复选框和收藏按钮）
-    card.innerHTML = `<img src="${song.cover}" loading="lazy"><div class="card-info"><div class="title" title="${song.title}">${song.title}</div><div class="artist">${song.artist}</div></div>`;
+    card.innerHTML = `<img src="${song.cover}" loading="lazy"><div class="card-info"><div class="title" title="${song.title}">${song.title}</div><div class="artist">${song.artist}</div></div>${playCountBadge}`;
 
     card.addEventListener('click', (e) => {
       // 防止点击复选框时触发播放
@@ -1022,12 +1103,14 @@ export function renderPlaylistSongs(songs) {
 export function switchTab(tab) {
   const previousTab = state.currentTab;
   state.currentTab = tab;
+  persistState(ui.audio);
   
   // 页面切换时重置右键菜单和清空复选框
   batchManager.resetBatchState();
   
   ui.navLocal?.classList.remove('active');
   ui.navFav?.classList.remove('active');
+  ui.navHotlist?.classList.remove('active');
   ui.navMount?.classList.remove('active');
   ui.navNetease?.classList.remove('active');
   ui.navUpload?.classList.remove('active');
@@ -1041,6 +1124,7 @@ export function switchTab(tab) {
 
   if (tab === 'local') ui.navLocal?.classList.add('active');
   else if (tab === 'fav') ui.navFav?.classList.add('active');
+  else if (tab === 'hotlist') ui.navHotlist?.classList.add('active');
   else if (tab === 'mount') ui.navMount?.classList.add('active');
   else if (tab === 'netease') ui.navNetease?.classList.add('active');
   else if (tab === 'upload') ui.navUpload?.classList.add('active');
@@ -1081,6 +1165,8 @@ export function switchTab(tab) {
           if (playlist) playlistName = playlist.name;
         }
         titleEl.innerText = playlistName;
+      } else if (tab === 'hotlist') {
+        titleEl.innerText = '播放记录';
       } else {
         titleEl.innerText = '歌曲列表';
       }
@@ -1091,6 +1177,7 @@ export function switchTab(tab) {
   const titles = {
     'local': '本地音乐',
     'fav': '我的收藏',
+    'hotlist': '播放记录',
     'mount': '目录管理',
     'netease': '网易下载',
     'upload': '上传音乐',
@@ -1173,7 +1260,7 @@ export function switchTab(tab) {
 }
 
 async function initPlayerState() {
-  const allowedTabs = ['local', 'fav', 'mount', 'netease', 'upload', 'settings'];
+  const allowedTabs = ['local', 'fav', 'mount', 'netease', 'upload', 'settings', 'hotlist'];
   const preferredTab = allowedTabs.includes(state.currentTab) ? state.currentTab : null;
   const savedTab = allowedTabs.includes(state.savedState.tab) ? state.savedState.tab : 'local';
   const targetTab = preferredTab || savedTab;
@@ -1320,6 +1407,12 @@ function prevTrack() {
 let isDragging = false;
 
 ui.audio.addEventListener('ended', () => {
+  // 记录收听统计
+  const currentSong = state.playQueue[state.currentTrackIndex];
+  if (currentSong && ui.audio.duration > 0) {
+    updateListenStats(currentSong, ui.audio.duration);
+  }
+
   // 结束时将最后一句歌词居中显示
   if (state.lyricsData.length && ui.lyricsContainer) {
     const lastIdx = state.lyricsData.length - 1;
@@ -1996,4 +2089,39 @@ export async function initPlayer() {
   switchTab(state.currentTab);
   await loadSongs();
   await handleExternalFile();
+
+  // 恢复播放位置和音量 (延迟执行以确保DOM已完全加载)
+  setTimeout(() => {
+    try {
+      const savedState = JSON.parse(localStorage.getItem('2fmusic_state') || '{}');
+      
+      // 恢复音量
+      if (savedState.volume !== undefined && ui.audio) {
+        ui.audio.volume = Math.max(0, Math.min(1, savedState.volume));
+        if (ui.volumeSlider) ui.volumeSlider.value = ui.audio.volume * 100;
+        updateVolumeUI(ui.audio.volume);
+      }
+      
+      // 恢复播放位置 (只在有保存的播放位置时恢复)
+      if (savedState.currentTime && savedState.currentTime > 0 && savedState.currentFilename) {
+        // 检查当前歌曲是否匹配
+        const currentSong = state.playQueue[state.currentTrackIndex];
+        if (currentSong && currentSong.filename === savedState.currentFilename) {
+          // 延迟设置currentTime，确保音频已加载元数据
+          const seekTimer = setInterval(() => {
+            if (ui.audio?.duration > 0) {
+              clearInterval(seekTimer);
+              ui.audio.currentTime = Math.min(savedState.currentTime, ui.audio.duration);
+              console.log(`[Player] 恢复播放位置: ${formatTime(savedState.currentTime)}/${formatTime(ui.audio.duration)}`);
+            }
+          }, 100);
+          
+          // 30秒超时安全机制
+          setTimeout(() => clearInterval(seekTimer), 30000);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to restore playback state:', e);
+    }
+  }, 500);
 }
