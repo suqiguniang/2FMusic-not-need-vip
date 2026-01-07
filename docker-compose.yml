@@ -10,10 +10,6 @@ services:
     environment:
       - FLASK_ENV=production
       - TZ=Asia/Shanghai
+      - PORT=23237
+      - APP_PASSWORD=
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:23237"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 5s
