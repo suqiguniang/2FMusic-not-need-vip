@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  2fmusic:
+    image: ghcr.io/yuexps/2FMusic:latest
+    container_name: 2fmusic
+    ports:
+      - "23237:23237"
+    volumes:
+      - ./Music:/music
+      - ./logs:/app/logs
+    environment:
+      - FLASK_ENV=production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:23237"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
