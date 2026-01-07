@@ -9,6 +9,7 @@ services:
       - ./app.log:/app.log
     environment:
       - FLASK_ENV=production
+      - TZ=Asia/Shanghai
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:23237"]

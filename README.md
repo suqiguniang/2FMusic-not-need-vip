@@ -4,11 +4,11 @@
 
 [![pre-release](https://img.shields.io/github/v/release/yuexps/2FMusic?label=pre--release&include_prereleases)](https://github.com/yuexps/2FMusic/releases/latest) [![latest action](https://img.shields.io/github/actions/workflow/status/yuexps/2FMusic/test-build.yml?label=latest%20action)](https://github.com/yuexps/2FMusic/actions/workflows/test-build.yml)
 
-🚧 **目前项目处于早期开发阶段，功能暂不稳定，欢迎提交 PR 完善项目 或 Issue 反馈 Bug！**
+**目前项目处于早期开发阶段，功能暂不稳定，欢迎提交 PR 完善项目 或 Issue 反馈 Bug！**
 
 ---
 
-## ✨ 核心功能
+## 核心功能
 
 *   **🎧 本地音乐库**
     *   自动扫描并管理上传的音乐文件。
@@ -25,9 +25,7 @@
 *   **🔊 音频预览**
     *   支持右键快速预览播放音频文件（需安装 2FMusic Preview 扩展）。
 
-## 🚀 快速开始
-
-### 1. 启动服务
+## 直接启动
 
 ```bash
 python app/server/app.py --music-library-path ./Music --log-path ./app.log --port 23237
@@ -39,9 +37,30 @@ python app/server/app.py --music-library-path ./Music --log-path ./app.log --por
 - `--port`: 服务端口 (默认 23237)
 - `--password`: 设置访问密码
 
-### 2. 访问应用
 
-访问：`http://localhost:23237`
+## Docker Compose
+
+```yaml
+services:
+  2fmusic:
+    image: ghcr.io/yuexps/2FMusic:latest
+    container_name: 2fmusic
+    ports:
+      - "23237:23237"
+    volumes:
+      - ./Music:/Music
+      - ./app.log:/app.log
+    environment:
+      - FLASK_ENV=production
+      - TZ=Asia/Shanghai
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:23237"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+```
 
 ## 🛠️ 开源致谢
 
