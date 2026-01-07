@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   2fmusic:
     image: ghcr.io/yuexps/2FMusic:latest
@@ -7,8 +5,8 @@ services:
     ports:
       - "23237:23237"
     volumes:
-      - ./Music:/music
-      - ./logs:/app/logs
+      - ./Music:/Music
+      - ./app.log:/app.log
     environment:
       - FLASK_ENV=production
     restart: unless-stopped
