@@ -19,8 +19,8 @@ EXPOSE 23237
 # 设置环境变量默认值
 ENV PORT=23237
 ENV APP_PASSWORD=
-ENV MUSIC_LIBRARY_PATH=app/Music
-ENV LOG_PATH=app/app.log
+ENV MUSIC_LIBRARY_PATH=./data/Music
+ENV LOG_PATH=./data/app.log
 
 CMD ["python", "app/server/app.py"]
 
