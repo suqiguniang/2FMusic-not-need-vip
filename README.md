@@ -48,8 +48,7 @@ services:
     ports:
       - "23237:23237"
     volumes:
-      - ./Music:/app/Music
-      - ./app.log:/app/app.log
+      - ./:/app/data
     environment:
       - FLASK_ENV=production
       - TZ=Asia/Shanghai
