@@ -399,6 +399,10 @@ export const api = {
       });
       return jsonOrThrow(res);
     },
+    async matchUrl(id) {
+      const res = await fetch(`/api/netease/match_url?id=${encodeURIComponent(id)}`);
+      return jsonOrThrow(res);
+    },
     async configGet() {
       const res = await fetch('/api/netease/config');
       return jsonOrThrow(res);
