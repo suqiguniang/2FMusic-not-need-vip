@@ -10,6 +10,8 @@ let recommendLoading = false;
 
 const canDownloadSong = (song) => {
   if (!song) return false;
+  // 优先使用后端返回的 downloadable 字段（若存在）；否则回退到旧逻辑
+  if (typeof song.downloadable !== 'undefined') return !!song.downloadable;
   return !(song.is_vip && !state.neteaseIsVip);
 };
 
@@ -249,8 +251,8 @@ function renderNeteaseResults() {
   state.neteaseResults.forEach(song => {
     const card = document.createElement('div');
     card.className = 'netease-card';
-    const isVipSong = !!song.is_vip;
-    const canDownloadVip = isVipSong ? state.neteaseIsVip : true;
+  const isVipSong = !!song.is_vip;
+  const canDownloadVip = canDownloadSong(song);
     const levelLabelMap = {
       standard: '标准',
       higher: '较高',
@@ -283,7 +285,7 @@ function renderNeteaseResults() {
     checkbox.type = 'checkbox';
     const sid = String(song.id);
     checkbox.checked = state.neteaseSelected.has(sid);
-    if (isVipSong && !canDownloadVip) {
+    if (!canDownloadVip) {
       checkbox.disabled = true;
       state.neteaseSelected.delete(sid);
     }
@@ -300,9 +302,10 @@ function renderNeteaseResults() {
 
     const meta = document.createElement('div');
     meta.className = 'netease-meta';
-    const vipBadge = song.is_vip ? '<span class="netease-vip-badge">VIP</span>' : '';
-    const sizeText = formatBytes(song.size);
-    meta.innerHTML = `<div class="title">${song.title}${vipBadge}</div>
+  const vipBadge = song.is_vip ? '<span class="netease-vip-badge">VIP</span>' : '';
+  const matchedBadge = song.matched ? '<span class="netease-matched-badge" title="Match 接口可返回下载链接">-可下载</span>' : '';
+  const sizeText = formatBytes(song.size);
+  meta.innerHTML = `<div class="title">${song.title}${vipBadge}${matchedBadge}</div>
         <div class="subtitle">${song.artist}</div>
         <div class="extra"><span class="netease-level-pill ${levelClass}">${levelText}</span>${sizeText} · ${formatTime(song.duration || 0)}</div>`;
 
@@ -312,10 +315,11 @@ function renderNeteaseResults() {
     // 检查是否已下载
     const isDownloaded = state.fullPlaylist && state.fullPlaylist.some(local => isSameSong(local, song));
 
-    if (isVipSong && !canDownloadVip) {
+    if (!canDownloadVip) {
       const locked = document.createElement('div');
       locked.className = 'vip-locked';
-      locked.innerHTML = '<i class="fas fa-lock"></i> VIP专享';
+      // 如果是 VIP 且不可下载，显示 VIP 专享；否则显示不可用
+      locked.innerHTML = `<i class="fas fa-lock"></i> ${isVipSong ? 'VIP专享' : '不可下载'}`;
       actions.appendChild(locked);
     } else {
       const btn = document.createElement('button');
@@ -483,6 +487,20 @@ async function downloadNeteaseSong(song, btnEl) {
   const limit = state.neteaseMaxConcurrent || 20;
   const active = getActiveDownloadCount();
   const payload = { ...song, level };
+
+  // 如果 song.matched 表示 /song/url/match 可命中，优先把 match 返回的直接链接传给后端下载任务（不改变原有队列与保存逻辑）
+  try {
+    if (song.matched) {
+      const matchResp = await api.netease.matchUrl(song.id);
+      if (matchResp && matchResp.success && matchResp.url) {
+        // 将 match 返回的直接 URL 注入到 payload 中，后端在 run_download_task 中会优先使用该链接
+        payload.match_url = matchResp.url;
+        // 继续走原有队列流程（不在前端直接打开新窗口）
+      }
+    }
+  } catch (e) {
+    console.warn('matchUrl 请求失败，回退到后端默认下载：', e);
+  }
 
   if (active < limit) {
     const taskId = addDownloadTask(song, 'pending');
