@@ -1748,6 +1748,33 @@ def _format_netease_songs(source_tracks):
         privilege_fee = privilege.get('fee')
         # 仅在明确 fee==1（VIP 曲目）时标记 VIP，避免 fee=8 的“会员高音质”误标
         is_vip = (fee == 1) or (privilege_fee == 1)
+        # 如果被标记为 VIP，尝试调用 /song/url/match 接口查看是否能直接获得可用链接
+        # 若 match 接口返回可用链接，则将其视为可下载（标记为非 VIP 以便前端允许选择）
+        matched = False
+        try:
+            if is_vip:
+                match_resp = call_netease_api('/song/url/match', {'id': sid}, need_cookie=bool(NETEASE_COOKIE))
+                match_data = match_resp.get('data') if isinstance(match_resp, dict) else None
+                if match_data:
+                    # match 接口可能返回 list、dict 或直接是 url 字符串
+                    m = None
+                    if isinstance(match_data, str):
+                        url_str = match_data.strip()
+                        if url_str.startswith('http'):
+                            matched = True
+                            is_vip = False
+                    else:
+                        if isinstance(match_data, list) and match_data:
+                            m = match_data[0]
+                        elif isinstance(match_data, dict):
+                            m = match_data
+                        # 某些实现可能把 url 放在返回对象的不同字段中（如 url/proxyUrl/data）
+                        if m and (m.get('url') or m.get('proxyUrl') or m.get('data')):
+                            matched = True
+                            is_vip = False
+        except Exception:
+            # 忽略任何 match 请求错误，保持原有 is_vip 判断
+            matched = False
         user_level, max_level = _extract_song_level(privilege)
         artists = ' / '.join([a.get('name') for a in item.get('ar', []) if a.get('name')]) or '未知艺术家'
         album_info = item.get('al') or {}
@@ -1760,6 +1787,8 @@ def _format_netease_songs(source_tracks):
             'cover': (album_info.get('picUrl') or '').replace('http://', 'https://'),
             'duration': (item.get('dt') or 0) / 1000,
             'is_vip': is_vip,
+            'downloadable': (not is_vip) or matched,
+            'matched': matched,
             'level': user_level,
             'max_level': max_level,
             'size': size_bytes
@@ -2166,10 +2195,33 @@ def clear_metadata(song_id=None):
 # --- 辅助接口 ---
 @app.route('/api/music/covers/<cover_name>')
 def get_cover(cover_name):
-    cover_name = unquote(cover_name)
-    path = os.path.join(MUSIC_LIBRARY_PATH, 'covers', cover_name)
-    if os.path.exists(path): return send_file(path, mimetype='image/jpeg')
-    return jsonify({'error': 'Not found'}), 404
+    try:
+        # 1. 解析并规范化文件名，防止路径穿越
+        cover_name = unquote(cover_name)
+        # 去除任何可能的路径分隔符，确保只是文件名
+        cover_name = os.path.basename(cover_name)
+
+        covers_dir = os.path.abspath(os.path.join(MUSIC_LIBRARY_PATH, 'covers'))
+        path = os.path.abspath(os.path.join(covers_dir, cover_name))
+
+        # 2. 确保最终路径位于 covers 目录下
+        if not path.startswith(covers_dir + os.sep) and path != covers_dir:
+            logger.warning(f"非法的封面请求路径: {path}")
+            return jsonify({'error': 'Not found'}), 404
+
+        # 3. 返回文件
+        if os.path.exists(path):
+            try:
+                return send_file(path, mimetype='image/jpeg')
+            except Exception:
+                # 记录详细异常以便排查 send_file 导致的错误
+                logger.exception(f"发送封面文件失败: {path}")
+                return jsonify({'error': 'Internal Server Error'}), 500
+
+        return jsonify({'error': 'Not found'}), 404
+    except Exception:
+        logger.exception(f"处理封面请求失败: {cover_name}")
+        return jsonify({'error': 'Internal Server Error'}), 500
 
 @app.route('/api/music/upload', methods=['POST'])
 def upload_file():
@@ -2637,8 +2689,30 @@ def search_netease_music():
             fee = item.get('fee')
             privilege_fee = privilege.get('fee')
             # 仅 fee==1 视为 VIP；fee=8 只代表会员可享高音质，不强制标 VIP
-            # 仅 fee==1 视为 VIP；fee=8 只代表会员可享高音质，不强制标 VIP
             is_vip = (fee == 1) or (privilege_fee == 1)
+            # 若被标记为 VIP，尝试通过 /song/url/match 接口确认是否可直接获取链接；若能获取则视为可下载（将 is_vip 清除）
+            matched = False
+            try:
+                if is_vip:
+                    match_resp = call_netease_api('/song/url/match', {'id': song_id}, need_cookie=bool(NETEASE_COOKIE))
+                    match_data = match_resp.get('data') if isinstance(match_resp, dict) else None
+                    if match_data:
+                        m = None
+                        if isinstance(match_data, str):
+                            url_str = match_data.strip()
+                            if url_str.startswith('http'):
+                                matched = True
+                                is_vip = False
+                        else:
+                            if isinstance(match_data, list) and match_data:
+                                m = match_data[0]
+                            elif isinstance(match_data, dict):
+                                m = match_data
+                            if m and (m.get('url') or m.get('proxyUrl') or m.get('data')):
+                                matched = True
+                                is_vip = False
+            except Exception:
+                matched = False
             user_level, max_level = _extract_song_level(privilege)
             songs.append({
                 'id': song_id,
@@ -2650,7 +2724,9 @@ def search_netease_music():
                 'level': user_level,
                 'max_level': max_level,
                 'size': _extract_song_size(item), # Removed user_level parameter
-                'is_vip': is_vip
+                'is_vip': is_vip,
+                'downloadable': (not is_vip) or matched,
+                'matched': matched
             })
         return jsonify({'success': True, 'data': songs})
     except Exception as e:
@@ -2848,6 +2924,54 @@ def netease_debug():
     } # type: ignore
     return jsonify(info)
 
+
+@app.route('/api/netease/debug/match')
+def netease_match_debug():
+    """调试接口：直接调用 /song/url/match 并返回原始结果，方便排查 match 未命中的原因。
+    用法: /api/netease/debug/match?id=2039598645
+    """
+    song_id = request.args.get('id') or request.args.get('song_id')
+    if not song_id:
+        return jsonify({'success': False, 'error': '缺少 id 参数'})
+    try:
+        resp = call_netease_api('/song/url/match', {'id': song_id}, need_cookie=bool(NETEASE_COOKIE))
+        logger.info(f"Match debug for {song_id}: {resp}")
+        return jsonify({'success': True, 'id': song_id, 'raw': resp})
+    except Exception as e:
+        logger.warning(f"Match debug failed for {song_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/netease/match_url')
+def netease_match_url():
+    """返回 /song/url/match 可用的下载链接（如果存在）。
+    用法: /api/netease/match_url?id=2039598645
+    返回: { success: True, id: '...', url: 'https://...' }
+    """
+    song_id = request.args.get('id') or request.args.get('song_id')
+    if not song_id:
+        return jsonify({'success': False, 'error': '缺少 id 参数'})
+    try:
+        resp = call_netease_api('/song/url/match', {'id': song_id}, need_cookie=bool(NETEASE_COOKIE))
+        data = resp.get('data') if isinstance(resp, dict) else None
+        url = None
+        # 支持多种返回形式：字符串、list、dict
+        if isinstance(data, str):
+            s = data.strip()
+            if s.startswith('http'):
+                url = s
+        elif isinstance(data, list) and data:
+            m = data[0]
+            url = m.get('url') or m.get('proxyUrl') or m.get('data')
+        elif isinstance(data, dict):
+            url = data.get('url') or data.get('proxyUrl') or data.get('data')
+        if url:
+            return jsonify({'success': True, 'id': song_id, 'url': url, 'raw': resp})
+        return jsonify({'success': False, 'error': '未命中 match 或未返回可用链接', 'raw': resp})
+    except Exception as e:
+        logger.warning(f"Match URL failed for {song_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
 def _normalize_cover_url(url: str):
     if not url:
         return None
@@ -2900,11 +3024,41 @@ def run_download_task(task_id, payload):
         
         # 2. Get Download URL
         DOWNLOAD_TASKS[task_id]['status'] = 'downloading'
-        url_resp = call_netease_api('/song/url/v1', {'id': song_id, 'level': level})
-        data_list = url_resp.get('data', []) if isinstance(url_resp, dict) else []
+        # 如果是 VIP 歌曲，优先使用 /song/url/match 接口获取链接；否则使用原有的 /song/url/v1
+        is_vip = False
+        try:
+            # 优先用已获取到的 meta info 判断（如果存在），否则拉取一次详情
+            if 'info' in locals() and info:
+                priv = info.get('privilege') or {}
+                fee = info.get('fee') or priv.get('fee')
+                is_vip = (fee == 1)
+            else:
+                meta_for_vip = call_netease_api('/song/detail', {'ids': song_id})
+                songs_meta = meta_for_vip.get('songs', []) if isinstance(meta_for_vip, dict) else []
+                if songs_meta:
+                    item_meta = songs_meta[0]
+                    priv = item_meta.get('privilege') or {}
+                    fee = item_meta.get('fee') or priv.get('fee')
+                    is_vip = (fee == 1)
+        except Exception:
+            is_vip = False
+
+        url_resp = None
+        data_list = None
+        if is_vip:
+            try:
+                url_resp = call_netease_api('/song/url/match', {'id': song_id}, need_cookie=bool(NETEASE_COOKIE))
+                data_list = url_resp.get('data', []) if isinstance(url_resp, dict) else []
+            except Exception:
+                data_list = None
+
+        # 非 VIP 或 match 未命中时，使用原始 /song/url/v1 接口（并尝试回退）
         if not data_list:
-             raise Exception('Failed to get download URL data')
-        
+            url_resp = call_netease_api('/song/url/v1', {'id': song_id, 'level': level})
+            data_list = url_resp.get('data', []) if isinstance(url_resp, dict) else []
+            if not data_list:
+                 raise Exception('Failed to get download URL data')
+
         song_info = data_list[0]
         down_url = song_info.get('url')
         if not down_url:
@@ -3129,13 +3283,66 @@ def run_download_task(task_id, payload):
         DOWNLOAD_TASKS[task_id]['title'] = title
         DOWNLOAD_TASKS[task_id]['artist'] = artist
 
-        api_resp = call_netease_api('/song/url/v1', {'id': song_id, 'level': level}, need_cookie=bool(NETEASE_COOKIE))
-        data_list = api_resp.get('data') if isinstance(api_resp, dict) else None
+        api_resp = None
+        data_list = None
         track_info = None
-        if isinstance(data_list, list) and data_list:
-            track_info = data_list[0]
-        elif isinstance(data_list, dict):
-            track_info = data_list
+
+        # 如果前端在 payload 中提供了直接的 match_url（由前端 matchUrl 接口获取并注入），优先使用该链接
+        direct_url = payload.get('match_url') or payload.get('direct_url')
+        if direct_url:
+            download_url = direct_url
+            track_info = {'url': download_url}
+            # 尝试从 URL 推断扩展名
+            try:
+                p = urlparse(download_url)
+                path = p.path or ''
+                if '.' in path:
+                    ext = path.split('.')[-1].lower()
+                else:
+                    ext = 'mp3'
+            except Exception:
+                ext = 'mp3'
+
+            filename = base_filename if base_filename.lower().endswith(f".{ext}") else f"{base_filename}.{ext}"
+
+    # 判断是否为 VIP（优先使用已存在的 info，否则尝试拉取 /song/detail）
+        is_vip = False
+        try:
+            if 'info' in locals() and info:
+                priv = info.get('privilege') or {}
+                fee = info.get('fee') or priv.get('fee')
+                is_vip = (fee == 1)
+            else:
+                meta_for_vip = call_netease_api('/song/detail', {'ids': song_id})
+                songs_meta = meta_for_vip.get('songs', []) if isinstance(meta_for_vip, dict) else []
+                if songs_meta:
+                    item_meta = songs_meta[0]
+                    priv = item_meta.get('privilege') or {}
+                    fee = item_meta.get('fee') or priv.get('fee')
+                    is_vip = (fee == 1)
+        except Exception:
+            is_vip = False
+
+        # 如果是 VIP，优先调用 match 接口
+        if is_vip:
+            try:
+                api_resp = call_netease_api('/song/url/match', {'id': song_id}, need_cookie=bool(NETEASE_COOKIE))
+                data_list = api_resp.get('data') if isinstance(api_resp, dict) else None
+                if isinstance(data_list, list) and data_list:
+                    track_info = data_list[0]
+                elif isinstance(data_list, dict):
+                    track_info = data_list
+            except Exception:
+                track_info = None
+
+        # 非 VIP 或 match 未命中，使用原先的 /song/url/v1 获取逻辑并尝试回退到 standard
+        if not track_info:
+            api_resp = call_netease_api('/song/url/v1', {'id': song_id, 'level': level}, need_cookie=bool(NETEASE_COOKIE))
+            data_list = api_resp.get('data') if isinstance(api_resp, dict) else None
+            if isinstance(data_list, list) and data_list:
+                track_info = data_list[0]
+            elif isinstance(data_list, dict):
+                track_info = data_list
 
         if not track_info or (not track_info.get('url') and not track_info.get('proxyUrl')):
             # 回退到标准音质再试一次
