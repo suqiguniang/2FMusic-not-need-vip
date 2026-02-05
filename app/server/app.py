@@ -1445,6 +1445,18 @@ def get_system_status():
     """返回当前扫描状态和进度"""
     status = dict(SCAN_STATUS)
     status['library_version'] = LIBRARY_VERSION
+
+    # 实时获取准确数量
+    try:
+        with get_db() as conn:
+            music_cnt = conn.execute("SELECT COUNT(*) FROM songs").fetchone()[0]
+            pl_cnt = conn.execute("SELECT COUNT(*) FROM favorite_playlists").fetchone()[0]
+            status['music_count'] = music_cnt
+            status['playlist_count'] = pl_cnt
+    except Exception as e:
+        logger.error(f"Error counting stats: {e}")
+        pass
+        
     return jsonify(status)
 
 @app.route('/api/music', methods=['GET'])
