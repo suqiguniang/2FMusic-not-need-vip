@@ -435,6 +435,23 @@ def require_auth():
     path = request.path or ''
     if path.startswith('/static') or path.startswith('/login') or path == '/favicon.ico':
         return
+
+    # 放行 OPTIONS 请求 (CORS 预检)
+    if request.method == 'OPTIONS':
+        return
+
+    # 检查 X-Password header 认证
+    password_header = request.headers.get('X-Password')
+    # 同时也检查 URL 参数 'auth' (用于音频流播放等不支持 header 的场景)
+    if not password_header:
+        password_header = request.args.get('auth')
+        
+    if password_header:
+        stored_hash = hashlib.sha256(APP_AUTH_PASSWORD.encode()).hexdigest()
+        if password_header == APP_AUTH_PASSWORD or password_header.lower() == stored_hash.lower():
+            session['authed'] = True
+            return
+            
     if session.get('authed'):
         return
     return _auth_failed()
