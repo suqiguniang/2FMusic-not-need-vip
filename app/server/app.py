@@ -109,9 +109,14 @@ logger.info(f"Music Library Path: {MUSIC_LIBRARY_PATH}")
 # --- 全局状态变量 ---
 SCAN_STATUS = {
     'scanning': False,
-    'total': 0,
-    'processed': 0,
-    'current_file': ''
+    'scan_total': 0,
+    'scan_processed': 0,
+    'is_scraping': False,
+    'scrape_total': 0,
+    'scrape_processed': 0,
+    'current_file': '',
+    'current_path': '',
+    'failed': 0
 }
 scan_status_lock = threading.Lock()
 
@@ -1038,9 +1043,10 @@ def scrape_single_song(item, idx, total):
              SCAN_STATUS['failed'] = SCAN_STATUS.get('failed', 0) + 1
     finally:
         # 更新状态 (移至finally块，确保只有在处理完成后才更新进度，且使用锁保证线程安全)
+        # 使用 scrape_processed 专用于刮削进度
         with scan_status_lock:
-            current_processed = SCAN_STATUS.get('processed', 0) + 1
-            SCAN_STATUS['processed'] = current_processed
+            current_processed = SCAN_STATUS.get('scrape_processed', 0) + 1
+            SCAN_STATUS['scrape_processed'] = current_processed
             # 减少日志刷屏，只在5的倍数或完成时更新
             if current_processed % 5 == 0 or current_processed >= total:
                 SCAN_STATUS['current_file'] = "刮削中..."
@@ -1093,9 +1099,9 @@ def auto_scrape_missing_metadata(target_dir=None):
 
             logger.info(f"发现 {total} 首歌曲需要刮削元数据")
             
-            # 更新状态 total
-            SCAN_STATUS['total'] = total
-            SCAN_STATUS['processed'] = 0
+            # 更新状态 scrape_total 和 scrape_processed
+            SCAN_STATUS['scrape_total'] = total
+            SCAN_STATUS['scrape_processed'] = 0
             SCAN_STATUS['failed'] = 0
 
             # 使用线程池并发处理
@@ -1176,7 +1182,12 @@ def scan_directory_single(target_dir):
 
     try:
         with app.app_context():
-            SCAN_STATUS.update({'scanning': True, 'total': 0, 'processed': 0, 'current_file': '正在扫描目录...'})
+            SCAN_STATUS.update({
+                'scanning': True, 
+                'scan_total': 0, 
+                'scan_processed': 0, 
+                'current_file': '正在扫描目录...'
+            })
             logger.info(f"开始单独扫描目录: {target_dir}")
             
             disk_files = {} # path -> info
@@ -1213,7 +1224,7 @@ def scan_directory_single(target_dir):
                         files_to_process_list.append(info)
 
                 total_files = len(files_to_process_list)
-                SCAN_STATUS.update({'total': total_files, 'processed': 0})
+                SCAN_STATUS.update({'scan_total': total_files, 'scan_processed': 0})
                 
                 to_update_db = []
                 
@@ -1240,9 +1251,9 @@ def scan_directory_single(target_dir):
                                  res = future.result()
                                  to_update_db.append(res)
                              except Exception: pass
-                             SCAN_STATUS['processed'] += 1
-                             if SCAN_STATUS['processed'] % 5 == 0:
-                                 SCAN_STATUS['current_file'] = f"处理中... {int((SCAN_STATUS['processed']/total_files)*100)}%"
+                             SCAN_STATUS['scan_processed'] += 1
+                             if SCAN_STATUS['scan_processed'] % 5 == 0:
+                                 SCAN_STATUS['current_file'] = f"处理中... {int((SCAN_STATUS['scan_processed']/total_files)*100)}%"
 
                 if to_update_db:
                     conn.executemany('''
@@ -1281,7 +1292,13 @@ def scan_library_incremental():
     try:
         with app.app_context():
             # 更新状态：开始
-            SCAN_STATUS.update({'scanning': True, 'total': 0, 'processed': 0, 'current_file': '正在遍历文件...'})
+            # 更新状态：开始扫描
+            SCAN_STATUS.update({
+                'scanning': True, 
+                'scan_total': 0, 
+                'scan_processed': 0, 
+                'current_file': '正在遍历文件...'
+            })
             
             with open(lock_file, 'w') as f: f.write(str(time.time()))
             logger.info("开始增量扫描...")
@@ -1332,9 +1349,9 @@ def scan_library_incremental():
                 if not db_rec or db_rec['mtime'] != info['mtime'] or db_rec['size'] != info['size']:
                     files_to_process_list.append(info)
 
-            # 更新状态
+            # 更新状态 scan_total
             total_files = len(files_to_process_list)
-            SCAN_STATUS.update({'total': total_files, 'processed': 0})
+            SCAN_STATUS.update({'scan_total': total_files, 'scan_processed': 0})
             
             to_update_db = []
             
@@ -1372,9 +1389,9 @@ def scan_library_incremental():
                             to_update_db.append(res)
                         except Exception: pass
                         
-                        SCAN_STATUS['processed'] += 1
-                        if SCAN_STATUS['processed'] % 10 == 0:
-                            SCAN_STATUS['current_file'] = f"处理中... {int((SCAN_STATUS['processed']/total_files)*100)}%"
+                        SCAN_STATUS['scan_processed'] += 1
+                        if SCAN_STATUS['scan_processed'] % 10 == 0:
+                            SCAN_STATUS['current_file'] = f"处理中... {int((SCAN_STATUS['scan_processed']/total_files)*100)}%"
 
                 # 过滤重复文件 (批次内去重 + 数据库去重)
                 final_update_db = []
