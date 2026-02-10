@@ -37,7 +37,7 @@ jobs:
 
       - name: Prepare fnpack
         run: |
-          cp public/fnpack-1.2.1-linux-amd64 ./fnpack
+          cp build/fnpack-1.2.1-linux-amd64 ./fnpack
           chmod +x ./fnpack
 
       - name: Extract Version from Manifest
@@ -53,12 +53,12 @@ jobs:
         run: |
           echo "📦 Building Source (Python) Package..."
           ./fnpack build
-          SOURCE_FPK_NAME="2fmusic-${{ steps.version.outputs.version }}-python.fpk"
-          if [ -f "2fmusic.fpk" ]; then
-            mv 2fmusic.fpk "$SOURCE_FPK_NAME"
+          SOURCE_FPK_NAME="fnnas.2fmusic-${{ steps.version.outputs.version }}-python.fpk"
+          if [ -f "fnnas.2fmusic.fpk" ]; then
+            mv fnnas.2fmusic.fpk "$SOURCE_FPK_NAME"
             echo "Built: $SOURCE_FPK_NAME"
           else
-            echo "Error: 2fmusic.fpk not found!"
+            echo "Error: fnnas.2fmusic.fpk not found!"
             exit 1
           fi
           echo "source_pkg=$SOURCE_FPK_NAME" >> $GITHUB_OUTPUT
@@ -66,6 +66,6 @@ jobs:
       - name: Upload Source FPK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: 2fmusic-source-fpk
+          name: fnnas.2fmusic-source-fpk
           path: ${{ steps.build_source.outputs.source_pkg }}
           if-no-files-found: error

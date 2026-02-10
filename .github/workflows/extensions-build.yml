@@ -15,9 +15,8 @@ jobs:
 
     - name: Install fnpack
       run: |
-        wget https://static2.fnnas.com/fnpack/fnpack-1.2.1-linux-amd64 -O fnpack
-        chmod +x fnpack
-        sudo mv fnpack /usr/local/bin/
+        cp build/fnpack-1.2.1-linux-amd64 ./fnpack
+        chmod +x ./fnpack
 
     # ===============================
     # Build 2FMusic Preview (CGI)
@@ -35,16 +34,16 @@ jobs:
         rm app/ui/index.c
         
         # Package
-        fnpack build
+        ./fnpack build
         
         # Get Version from Manifest
         VERSION=$(grep "^version" manifest | awk -F'=' '{print $2}' | tr -d '[:space:]')
         SHORT_SHA=$(git rev-parse --short HEAD)
-        PKG_NAME="2fmusic-preview-cgi-${VERSION}-${SHORT_SHA}.fpk"
+        PKG_NAME="fnnas.2fmusic-preview-cgi-${VERSION}-${SHORT_SHA}.fpk"
         
         # Find and Move
-        if [ -f "2fmusic-preview.fpk" ]; then
-          mv 2fmusic-preview.fpk "../../$PKG_NAME"
+        if [ -f "fnnas.2fmusic-preview-cgi.fpk" ]; then
+          mv fnnas.2fmusic-preview-cgi.fpk "../../$PKG_NAME"
         else
           mv *.fpk "../../$PKG_NAME" || echo "Warning: No fpk found!"
         fi
@@ -56,5 +55,5 @@ jobs:
     - name: Upload CGI Extension
       uses: actions/upload-artifact@v4
       with:
-        name: 2fmusic-preview-cgi
+        name: fnnas.2fmusic-preview-cgi
         path: ${{ steps.build_preview_cgi.outputs.pkg_name }}
