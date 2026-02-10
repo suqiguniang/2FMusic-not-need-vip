@@ -30,7 +30,7 @@
 ## 直接启动
 
 ```bash
-python app/server/app.py --music-library-path ./Music --log-path ./app.log --port 23237
+python3 app/server/app.py --music-library-path ./Music --log-path ./app.log --port 23237 --password 123456
 ```
 
 参数：

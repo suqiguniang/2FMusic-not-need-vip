@@ -37,7 +37,7 @@ jobs:
 
       - name: Prepare fnpack
         run: |
-          cp public/fnpack-1.0.4-linux-amd64 ./fnpack
+          cp public/fnpack-1.2.1-linux-amd64 ./fnpack
           chmod +x ./fnpack
 
       - name: Extract Version from Manifest

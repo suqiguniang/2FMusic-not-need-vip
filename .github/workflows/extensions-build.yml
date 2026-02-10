@@ -15,7 +15,7 @@ jobs:
 
     - name: Install fnpack
       run: |
-        wget https://static2.fnnas.com/fnpack/fnpack-1.0.4-linux-amd64 -O fnpack
+        wget https://static2.fnnas.com/fnpack/fnpack-1.2.1-linux-amd64 -O fnpack
         chmod +x fnpack
         sudo mv fnpack /usr/local/bin/
 
