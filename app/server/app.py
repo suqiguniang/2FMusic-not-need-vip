@@ -75,12 +75,12 @@ parser.add_argument('--password', type=str, default=os.environ.get('APP_AUTH_PAS
 args = parser.parse_args()
 
 # --- 路径初始化 ---
-MUSIC_LIBRARY_PATH = args.music_library_path or os.getcwd()
+MUSIC_LIBRARY_PATH = os.path.abspath(args.music_library_path or os.getcwd())
 os.makedirs(MUSIC_LIBRARY_PATH, exist_ok=True)
 os.makedirs(os.path.join(MUSIC_LIBRARY_PATH, 'lyrics'), exist_ok=True)
 os.makedirs(os.path.join(MUSIC_LIBRARY_PATH, 'covers'), exist_ok=True)
 
-log_file = args.log_path or os.path.join(os.getcwd(), 'app.log')
+log_file = os.path.abspath(args.log_path or os.path.join(os.getcwd(), 'app.log'))
 os.makedirs(os.path.dirname(log_file), exist_ok=True)
 DB_PATH = os.path.join(MUSIC_LIBRARY_PATH, 'data.db')
 
