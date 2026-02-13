@@ -14,6 +14,7 @@ import concurrent.futures
 from urllib.parse import quote, unquote, urlparse, parse_qs
 import hashlib
 import uuid
+import signal
 from datetime import timedelta
 
 if getattr(sys, 'frozen', False):
@@ -209,6 +210,21 @@ def init_watchdog():
     except:
         global_observer.stop()
     global_observer.join()
+
+def shutdown_handler(signum, frame):
+    """处理停止信号，优雅关闭服务"""
+    global global_observer
+    logger.info(f"接收到信号 ({signum})，正在准备关闭服务...")
+    if global_observer:
+        logger.info("正在停止文件监听服务...")
+        global_observer.stop()
+        # 注意：不再调用 join()，因为这可能是在信号处理函数中
+    logger.info("服务已停止")
+    sys.exit(0)
+
+# 注册信号处理器 (SIGTERM 用于 Docker 停止, SIGINT 用于 Ctrl+C)
+signal.signal(signal.SIGTERM, shutdown_handler)
+signal.signal(signal.SIGINT, shutdown_handler)
 
 def refresh_watchdog_paths():
     """根据数据库刷新监听目录"""

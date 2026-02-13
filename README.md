@@ -51,6 +51,7 @@ services:
       - "23237:23237"
     volumes:
       - ./:/app/data
+      - /vol2/1000/Music:/vol2/1000/Music # 挂载本地音乐文件夹（自行修改）
     environment:
       - FLASK_ENV=production
       - TZ=Asia/Shanghai
