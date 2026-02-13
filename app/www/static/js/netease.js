@@ -303,7 +303,7 @@ function renderNeteaseResults() {
     const meta = document.createElement('div');
     meta.className = 'netease-meta';
   const vipBadge = song.is_vip ? '<span class="netease-vip-badge">VIP</span>' : '';
-  const matchedBadge = song.matched ? '<span class="netease-matched-badge" title="Match 接口可返回下载链接">-可下载</span>' : '';
+  const matchedBadge = song.matched ? '<span class="netease-matched-badge" title="Match 接口可返回下载链接"></span>' : '';
   const sizeText = formatBytes(song.size);
   meta.innerHTML = `<div class="title">${song.title}${vipBadge}${matchedBadge}</div>
         <div class="subtitle">${song.artist}</div>
@@ -314,6 +314,12 @@ function renderNeteaseResults() {
 
     // 检查是否已下载
     const isDownloaded = state.fullPlaylist && state.fullPlaylist.some(local => isSameSong(local, song));
+
+    // 如果歌曲已下载，禁用复选框并从选中列表中移除
+    if (isDownloaded) {
+      checkbox.disabled = true;
+      state.neteaseSelected.delete(sid);
+    }
 
     if (!canDownloadVip) {
       const locked = document.createElement('div');
@@ -427,6 +433,24 @@ async function startNeteaseDownload({ taskId, song, btnEl }) {
                 }
 
                 if (newStatus === 'success') {
+                  // 检查本地是否已存在相同的歌曲
+                  const existingSongIndex = state.fullPlaylist.findIndex(local => isSameSong(local, song));
+                  if (existingSongIndex !== -1) {
+                    try {
+                      // 删除本地已存在的旧文件
+                      await api.library.deleteFile(state.fullPlaylist[existingSongIndex].filename);
+                      // 从 fullPlaylist 中移除旧的歌曲信息
+                      state.fullPlaylist.splice(existingSongIndex, 1);
+                    } catch (error) {
+                      console.error('覆盖旧文件失败:', error);
+                      showToast('覆盖旧文件失败');
+                    }
+                  }
+
+                  // 添加新下载的歌曲到 fullPlaylist
+                  state.fullPlaylist.push({ ...song, filename: tData.filename });
+                  renderPlaylistSongs(state.fullPlaylist);
+
                   if (songRefreshCallback) await songRefreshCallback();
                 } else {
                   showToast(`下载失败: ${tData.message || '未知错误'}`);
@@ -477,6 +501,14 @@ async function downloadNeteaseSong(song, btnEl) {
     showToast('VIP 歌曲仅登录会员可下载');
     return;
   }
+
+  // 检查是否已下载
+  const downloadedTask = state.neteaseDownloadTasks.find(t => String(t.songId) === String(song.id) && t.status === 'success');
+  if (downloadedTask) {
+    showToast('该歌曲已下载，无法重复选择');
+    return;
+  }
+
   const level = 'exhigh';
 
   // 检查是否有正在进行的相同任务
@@ -488,18 +520,15 @@ async function downloadNeteaseSong(song, btnEl) {
   const active = getActiveDownloadCount();
   const payload = { ...song, level };
 
-  // 如果 song.matched 表示 /song/url/match 可命中，优先把 match 返回的直接链接传给后端下载任务（不改变原有队列与保存逻辑）
+  // 始终尝试获取 /song/url/match 的链接
   try {
-    if (song.matched) {
-      const matchResp = await api.netease.matchUrl(song.id);
-      if (matchResp && matchResp.success && matchResp.url) {
-        // 将 match 返回的直接 URL 注入到 payload 中，后端在 run_download_task 中会优先使用该链接
-        payload.match_url = matchResp.url;
-        // 继续走原有队列流程（不在前端直接打开新窗口）
-      }
+    const matchResp = await fetch(`/song/url/match?id=${encodeURIComponent(song.id)}`);
+    const matchData = await matchResp.json();
+    if (matchData && matchData.url) {
+      payload.match_url = matchData.url;
     }
   } catch (e) {
-    console.warn('matchUrl 请求失败，回退到后端默认下载：', e);
+    console.warn('获取 /song/url/match 链接失败，回退到默认下载逻辑：', e);
   }
 
   if (active < limit) {
