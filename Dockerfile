@@ -19,10 +19,10 @@ EXPOSE 23237
 # 设置环境变量默认值
 ENV PORT=23237
 ENV APP_PASSWORD=
-ENV MUSIC_LIBRARY_PATH=./data/Music
-ENV LOG_PATH=./data/app.log
+ENV MUSIC_LIBRARY_PATH=/app/data/Music
+ENV LOG_PATH=/app/data/app.log
 
-CMD ["python", "app/server/app.py"]
+CMD ["python3", "app/server/app.py"]
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

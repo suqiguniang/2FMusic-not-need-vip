@@ -101,9 +101,8 @@ jobs:
     # 4. 安装 fnpack
     - name: Install fnpack
       run: |
-        wget https://static2.fnnas.com/fnpack/fnpack-1.0.4-linux-amd64 -O fnpack
-        chmod +x fnpack
-        sudo mv fnpack /usr/local/bin/
+        cp build/fnpack-1.2.1-linux-amd64 ./fnpack
+        chmod +x ./fnpack
 
     # ==========================================
     # 5. 构建第一个版本：源码版 (Python Version)
@@ -112,14 +111,14 @@ jobs:
       id: build_source
       run: |
         echo "📦 Building Source (Python) Package..."
-        fnpack build
+        ./fnpack build
         
-        SOURCE_FPK_NAME="2fmusic-${{ steps.version.outputs.version }}-python.fpk"
+        SOURCE_FPK_NAME="fnnas.2fmusic-${{ steps.version.outputs.version }}-python.fpk"
         
-        if [ -f "2fmusic.fpk" ]; then
-          mv 2fmusic.fpk "$SOURCE_FPK_NAME"
+        if [ -f "fnnas.2fmusic.fpk" ]; then
+          mv fnnas.2fmusic.fpk "$SOURCE_FPK_NAME"
         else
-          echo "Error: 2fmusic.fpk not found!"
+          echo "Error: fnnas.2fmusic.fpk not found!"
           exit 1
         fi
         
@@ -156,14 +155,14 @@ jobs:
       id: build_binary
       run: |
         echo "📦 Building Binary (Standalone) Package..."
-        fnpack build
+        ./fnpack build
         
-        BINARY_FPK_NAME="2fmusic-${{ steps.version.outputs.version }}-amd64.fpk"
+        BINARY_FPK_NAME="fnnas.2fmusic-${{ steps.version.outputs.version }}-amd64.fpk"
         
-        if [ -f "2fmusic.fpk" ]; then
-          mv 2fmusic.fpk "$BINARY_FPK_NAME"
+        if [ -f "fnnas.2fmusic.fpk" ]; then
+          mv fnnas.2fmusic.fpk "$BINARY_FPK_NAME"
         else
-          echo "Error: 2fmusic.fpk not found!"
+          echo "Error: fnnas.2fmusic.fpk not found!"
           exit 1
         fi
         
@@ -177,6 +176,7 @@ jobs:
       id: build_preview_cgi
       run: |
         echo "📦 Building Preview Extension (CGI)..."
+        mv ./fnpack extensions/preview-cgi/fnpack
         cd extensions/preview-cgi
         
         # Compile C Code
@@ -186,16 +186,16 @@ jobs:
         rm app/ui/index.c
         
         # Package
-        fnpack build
+        ./fnpack build
         
         # Get Version from Manifest
         VERSION=$(grep "^version" manifest | awk -F'=' '{print $2}' | tr -d '[:space:]')
         SHORT_SHA=$(git rev-parse --short HEAD)
-        PKG_NAME="2fmusic-preview-cgi-${VERSION}-${SHORT_SHA}.fpk"
+        PKG_NAME="fnnas.2fmusic-preview-cgi-${VERSION}-${SHORT_SHA}.fpk"
         
         # Find and Move
-        if [ -f "2fmusic-preview.fpk" ]; then
-          mv 2fmusic-preview.fpk "../../$PKG_NAME"
+        if [ -f "fnnas.2fmusic-preview-cgi.fpk" ]; then
+          mv fnnas.2fmusic-preview-cgi.fpk "../../$PKG_NAME"
         else
           mv *.fpk "../../$PKG_NAME" || echo "Warning: No fpk found!"
         fi
@@ -220,27 +220,27 @@ jobs:
         tag_name: v${{ steps.version.outputs.version }}-pre
         name: 2FMusic ${{ steps.version.outputs.version }}
         body: |
-          ## 🚀 自动构建的测试版
+          ## 自动构建的测试版
 
-          ### ℹ️ 构建信息
+          ### 构建信息
           - **版本**: ${{ steps.version.outputs.version }}
           - **触发者**: @${{ github.actor }}
           - **事件**: ${{ github.event_name }}
           
-          ### 📝 变更日志
+          ### 变更日志
           ${{ steps.changelog.outputs.logs }}
 
           ---
 
-          ### 1. 🐍 Python 源码版
+          ### 1. Python 源码版
           - **文件**: `${{ steps.build_source.outputs.source_pkg }}`
           - **依赖**: 依赖 Python 环境 (`python312`)。
           
-          ### 2. ⚡ 二进制版（推荐）
+          ### 2. 二进制版（推荐）
           - **文件**: `${{ steps.build_binary.outputs.binary_pkg }}`
           - **依赖**: **无需** Python 环境，开箱即用。
 
-          ### 3. 🗂️ 预览播放拓展（可选）
+          ### 3. 预览播放拓展（可选）
           - **文件**: `${{ steps.build_preview_cgi.outputs.pkg_name }}`
           - **说明**: Web端文件管理器双击预览播放拓展，注意：此拓展会导致移动端APP音乐播放器失效！
 

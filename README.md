@@ -1,4 +1,4 @@
-# 🎵 2FMusic
+# 2FMusic
 
 > 这是一个轻量的本地音乐播放器，基于 Flask + 原生 Web 技术构建。
 
@@ -10,25 +10,27 @@
 
 ## 核心功能
 
-*   **🎧 本地音乐库**
+*   **本地音乐库**
     *   自动扫描并管理上传的音乐文件。
     *   支持识别 ID3 内嵌元数据（封面、歌词）。
     *   支持通过 网络源 自动获取封面、歌词。
-*   **📱 沉浸式播放器**
+*   **沉浸式播放器**
     *   **响应式 UI**：PC Web端 提供原生 App 般的流畅体验。
     *   **动态视觉**：支持歌词滚动显示、根据封面自动提取主题色。
-*   **📂 灵活目录管理**
+*   **灵活目录管理**
     *   支持添加服务器上的任意文件夹到音乐库，无需重复移动文件。
-*   **☁️ 网易云音乐集成**
+*   **网易云音乐集成**
     *   集成搜索、高品质下载功能。
     *   支持链接解析及扫码登录，轻松同步歌单。
-*   **🔊 音频预览**
+*   **音频预览**
     *   支持右键快速预览播放音频文件（需安装 2FMusic Preview 扩展）。
+*   **Android APP**
+    *   提供专属原生 Android APP，流畅体验（也许吧）。
 
 ## 直接启动
 
 ```bash
-python app/server/app.py --music-library-path ./Music --log-path ./app.log --port 23237
+python3 app/server/app.py --music-library-path ./Music --log-path ./app.log --port 23237 --password 123456
 ```
 
 参数：
@@ -49,6 +51,7 @@ services:
       - "23237:23237"
     volumes:
       - ./:/app/data
+      - /vol2/1000/Music:/vol2/1000/Music # 挂载本地音乐文件夹（自行修改）
     environment:
       - FLASK_ENV=production
       - TZ=Asia/Shanghai
@@ -57,7 +60,7 @@ services:
     restart: unless-stopped
 ```
 
-## 🛠️ 开源致谢
+## 开源致谢
 
 本项目使用了以下优秀的开源项目：
 

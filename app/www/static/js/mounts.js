@@ -26,8 +26,10 @@ export function startScanPolling(isUserAction = false, onRefreshSongs, onRefresh
         hasTrackedScan = true;
         if (!isModalOpen) {
           if (isUserAction || state.fullPlaylist.length === 0) {
-            const percent = status.total > 0 ? Math.round((status.processed / status.total) * 100) : 0;
-            showToast(`正在处理库... ${status.processed}/${status.total} (${percent}%)`, true);
+            const total = status.scan_total || status.total || 0;
+            const processed = (status.scan_processed !== undefined) ? status.scan_processed : (status.processed || 0);
+            const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
+            showToast(`正在处理库... ${processed}/${total} (${percent}%)`, true);
           }
         }
       } else {
@@ -49,7 +51,9 @@ export function startScanPolling(isUserAction = false, onRefreshSongs, onRefresh
 
       if (bars.length > 0) {
         if (isScraping) {
-          const pct = status.total > 0 ? Math.round((status.processed / status.total) * 100) : 0;
+          const total = status.scrape_total || status.total || 0;
+          const processed = (status.scrape_processed !== undefined) ? status.scrape_processed : (status.processed || 0);
+          const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
           const text = status.current_file || '后台处理中...';
           const currentPath = status.current_path || '';
 
@@ -369,7 +373,9 @@ export function trackMountProgress(onDone) {
     try {
       const status = await api.system.status();
       if (status.scanning) {
-        const percent = status.total > 0 ? Math.round((status.processed / status.total) * 100) : 0;
+        const total = status.scan_total || status.total || 0;
+        const processed = (status.scan_processed !== undefined) ? status.scan_processed : (status.processed || 0);
+        const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
         if (ui.uploadFill) ui.uploadFill.style.width = `${percent}%`;
         if (ui.uploadPercent) ui.uploadPercent.innerText = `${percent}%`;
         if (ui.uploadMsg) ui.uploadMsg.innerText = status.current_file || '处理中...';

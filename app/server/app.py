@@ -14,6 +14,7 @@ import concurrent.futures
 from urllib.parse import quote, unquote, urlparse, parse_qs
 import hashlib
 import uuid
+import signal
 from datetime import timedelta
 
 if getattr(sys, 'frozen', False):
@@ -75,12 +76,12 @@ parser.add_argument('--password', type=str, default=os.environ.get('APP_AUTH_PAS
 args = parser.parse_args()
 
 # --- 路径初始化 ---
-MUSIC_LIBRARY_PATH = args.music_library_path or os.getcwd()
+MUSIC_LIBRARY_PATH = os.path.abspath(args.music_library_path or os.getcwd())
 os.makedirs(MUSIC_LIBRARY_PATH, exist_ok=True)
 os.makedirs(os.path.join(MUSIC_LIBRARY_PATH, 'lyrics'), exist_ok=True)
 os.makedirs(os.path.join(MUSIC_LIBRARY_PATH, 'covers'), exist_ok=True)
 
-log_file = args.log_path or os.path.join(os.getcwd(), 'app.log')
+log_file = os.path.abspath(args.log_path or os.path.join(os.getcwd(), 'app.log'))
 os.makedirs(os.path.dirname(log_file), exist_ok=True)
 DB_PATH = os.path.join(MUSIC_LIBRARY_PATH, 'data.db')
 
@@ -109,9 +110,14 @@ logger.info(f"Music Library Path: {MUSIC_LIBRARY_PATH}")
 # --- 全局状态变量 ---
 SCAN_STATUS = {
     'scanning': False,
-    'total': 0,
-    'processed': 0,
-    'current_file': ''
+    'scan_total': 0,
+    'scan_processed': 0,
+    'is_scraping': False,
+    'scrape_total': 0,
+    'scrape_processed': 0,
+    'current_file': '',
+    'current_path': '',
+    'failed': 0
 }
 scan_status_lock = threading.Lock()
 
@@ -204,6 +210,21 @@ def init_watchdog():
     except:
         global_observer.stop()
     global_observer.join()
+
+def shutdown_handler(signum, frame):
+    """处理停止信号，优雅关闭服务"""
+    global global_observer
+    logger.info(f"接收到信号 ({signum})，正在准备关闭服务...")
+    if global_observer:
+        logger.info("正在停止文件监听服务...")
+        global_observer.stop()
+        # 注意：不再调用 join()，因为这可能是在信号处理函数中
+    logger.info("服务已停止")
+    sys.exit(0)
+
+# 注册信号处理器 (SIGTERM 用于 Docker 停止, SIGINT 用于 Ctrl+C)
+signal.signal(signal.SIGTERM, shutdown_handler)
+signal.signal(signal.SIGINT, shutdown_handler)
 
 def refresh_watchdog_paths():
     """根据数据库刷新监听目录"""
@@ -435,6 +456,23 @@ def require_auth():
     path = request.path or ''
     if path.startswith('/static') or path.startswith('/login') or path == '/favicon.ico':
         return
+
+    # 放行 OPTIONS 请求 (CORS 预检)
+    if request.method == 'OPTIONS':
+        return
+
+    # 检查 X-Password header 认证
+    password_header = request.headers.get('X-Password')
+    # 同时也检查 URL 参数 'auth' (用于音频流播放等不支持 header 的场景)
+    if not password_header:
+        password_header = request.args.get('auth')
+        
+    if password_header:
+        stored_hash = hashlib.sha256(APP_AUTH_PASSWORD.encode()).hexdigest()
+        if password_header == APP_AUTH_PASSWORD or password_header.lower() == stored_hash.lower():
+            session['authed'] = True
+            return
+            
     if session.get('authed'):
         return
     return _auth_failed()
@@ -442,7 +480,7 @@ def require_auth():
 @app.after_request
 def add_cors_headers(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-Password'
     response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
     
     # 为Service Worker脚本添加特殊头，允许全局scope
@@ -1021,9 +1059,10 @@ def scrape_single_song(item, idx, total):
              SCAN_STATUS['failed'] = SCAN_STATUS.get('failed', 0) + 1
     finally:
         # 更新状态 (移至finally块，确保只有在处理完成后才更新进度，且使用锁保证线程安全)
+        # 使用 scrape_processed 专用于刮削进度
         with scan_status_lock:
-            current_processed = SCAN_STATUS.get('processed', 0) + 1
-            SCAN_STATUS['processed'] = current_processed
+            current_processed = SCAN_STATUS.get('scrape_processed', 0) + 1
+            SCAN_STATUS['scrape_processed'] = current_processed
             # 减少日志刷屏，只在5的倍数或完成时更新
             if current_processed % 5 == 0 or current_processed >= total:
                 SCAN_STATUS['current_file'] = "刮削中..."
@@ -1035,8 +1074,8 @@ def auto_scrape_missing_metadata(target_dir=None):
         logger.info(f"开始自动刮削缺失元数据... {f'(目录: {target_dir})' if target_dir else ''}")
         SCAN_STATUS['current_file'] = "正在准备自动刮削..."
         SCAN_STATUS['is_scraping'] = True
-        SCAN_STATUS['processed'] = 0
-        SCAN_STATUS['total'] = 0
+        SCAN_STATUS['scrape_processed'] = 0
+        SCAN_STATUS['scrape_total'] = 0
         
         try:
             songs_to_scrape = []
@@ -1076,9 +1115,9 @@ def auto_scrape_missing_metadata(target_dir=None):
 
             logger.info(f"发现 {total} 首歌曲需要刮削元数据")
             
-            # 更新状态 total
-            SCAN_STATUS['total'] = total
-            SCAN_STATUS['processed'] = 0
+            # 更新状态 scrape_total 和 scrape_processed
+            SCAN_STATUS['scrape_total'] = total
+            SCAN_STATUS['scrape_processed'] = 0
             SCAN_STATUS['failed'] = 0
 
             # 使用线程池并发处理
@@ -1159,7 +1198,12 @@ def scan_directory_single(target_dir):
 
     try:
         with app.app_context():
-            SCAN_STATUS.update({'scanning': True, 'total': 0, 'processed': 0, 'current_file': '正在扫描目录...'})
+            SCAN_STATUS.update({
+                'scanning': True, 
+                'scan_total': 0, 
+                'scan_processed': 0, 
+                'current_file': '正在扫描目录...'
+            })
             logger.info(f"开始单独扫描目录: {target_dir}")
             
             disk_files = {} # path -> info
@@ -1196,7 +1240,7 @@ def scan_directory_single(target_dir):
                         files_to_process_list.append(info)
 
                 total_files = len(files_to_process_list)
-                SCAN_STATUS.update({'total': total_files, 'processed': 0})
+                SCAN_STATUS.update({'scan_total': total_files, 'scan_processed': 0})
                 
                 to_update_db = []
                 
@@ -1223,9 +1267,9 @@ def scan_directory_single(target_dir):
                                  res = future.result()
                                  to_update_db.append(res)
                              except Exception: pass
-                             SCAN_STATUS['processed'] += 1
-                             if SCAN_STATUS['processed'] % 5 == 0:
-                                 SCAN_STATUS['current_file'] = f"处理中... {int((SCAN_STATUS['processed']/total_files)*100)}%"
+                             SCAN_STATUS['scan_processed'] += 1
+                             if SCAN_STATUS['scan_processed'] % 5 == 0:
+                                 SCAN_STATUS['current_file'] = f"处理中... {int((SCAN_STATUS['scan_processed']/total_files)*100)}%"
 
                 if to_update_db:
                     conn.executemany('''
@@ -1264,7 +1308,13 @@ def scan_library_incremental():
     try:
         with app.app_context():
             # 更新状态：开始
-            SCAN_STATUS.update({'scanning': True, 'total': 0, 'processed': 0, 'current_file': '正在遍历文件...'})
+            # 更新状态：开始扫描
+            SCAN_STATUS.update({
+                'scanning': True, 
+                'scan_total': 0, 
+                'scan_processed': 0, 
+                'current_file': '正在遍历文件...'
+            })
             
             with open(lock_file, 'w') as f: f.write(str(time.time()))
             logger.info("开始增量扫描...")
@@ -1315,9 +1365,9 @@ def scan_library_incremental():
                 if not db_rec or db_rec['mtime'] != info['mtime'] or db_rec['size'] != info['size']:
                     files_to_process_list.append(info)
 
-            # 更新状态
+            # 更新状态 scan_total
             total_files = len(files_to_process_list)
-            SCAN_STATUS.update({'total': total_files, 'processed': 0})
+            SCAN_STATUS.update({'scan_total': total_files, 'scan_processed': 0})
             
             to_update_db = []
             
@@ -1355,9 +1405,9 @@ def scan_library_incremental():
                             to_update_db.append(res)
                         except Exception: pass
                         
-                        SCAN_STATUS['processed'] += 1
-                        if SCAN_STATUS['processed'] % 10 == 0:
-                            SCAN_STATUS['current_file'] = f"处理中... {int((SCAN_STATUS['processed']/total_files)*100)}%"
+                        SCAN_STATUS['scan_processed'] += 1
+                        if SCAN_STATUS['scan_processed'] % 10 == 0:
+                            SCAN_STATUS['current_file'] = f"处理中... {int((SCAN_STATUS['scan_processed']/total_files)*100)}%"
 
                 # 过滤重复文件 (批次内去重 + 数据库去重)
                 final_update_db = []
@@ -1428,6 +1478,18 @@ def get_system_status():
     """返回当前扫描状态和进度"""
     status = dict(SCAN_STATUS)
     status['library_version'] = LIBRARY_VERSION
+
+    # 实时获取准确数量
+    try:
+        with get_db() as conn:
+            music_cnt = conn.execute("SELECT COUNT(*) FROM songs").fetchone()[0]
+            pl_cnt = conn.execute("SELECT COUNT(*) FROM favorite_playlists").fetchone()[0]
+            status['music_count'] = music_cnt
+            status['playlist_count'] = pl_cnt
+    except Exception as e:
+        logger.error(f"Error counting stats: {e}")
+        pass
+        
     return jsonify(status)
 
 @app.route('/api/music', methods=['GET'])
