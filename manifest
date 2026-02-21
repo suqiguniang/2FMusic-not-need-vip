@@ -1,5 +1,5 @@
 appname               = fnnas.2fmusic
-version               = 0.1.0
+version               = 0.1.0.1
 display_name          = 2FMusic
 desc                  = """
 <b>2FMusic</b> 简洁的本地音乐播放器。
